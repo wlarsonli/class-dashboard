@@ -4,8 +4,8 @@ project_id = "class-dashboard"
 [auth]
 site_url = "https://wlarsonli.github.io/class-dashboard/"
 additional_redirect_urls = ["https://wlarsonli.github.io/class-dashboard/"]
-# Set to false once your account exists, so nobody else can sign up.
-enable_signup = true
+# Off: your account exists, so nobody else can sign up. (Signing in still works.)
+enable_signup = false
 
 [auth.email]
 enabled = true

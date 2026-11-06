@@ -3,6 +3,10 @@
 A soft-pastel dashboard for classes, deadlines, and a weekly work plan. It runs as a web app on your
 laptop and iPhone (added to the Home Screen) and syncs between them through Supabase.
 
+**Live:** https://wlarsonli.github.io/class-dashboard/
+· Supabase project `jiubqvyadpqyaksttvdl` (us-east-2)
+· Jobs: sync hourly at :07, notifications every 15 minutes
+
 - **Today:** overdue and due-today items, work planned for today, the next 7 days, today's classes and
   Outlook events, countdowns to exams and big deadlines, and a term progress bar.
 - **Week:** a Monday–Sunday planner. It suggests which day to work on each task, based on your time
