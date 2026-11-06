@@ -1,0 +1,42 @@
+# Supabase CLI settings for this project (pushed with `supabase config push`).
+project_id = "class-dashboard"
+
+[auth]
+site_url = "https://wlarsonli.github.io/class-dashboard/"
+additional_redirect_urls = ["https://wlarsonli.github.io/class-dashboard/"]
+# Set to false once your account exists, so nobody else can sign up.
+enable_signup = true
+
+[auth.email]
+enabled = true
+# Your one account doesn't need a confirmation email.
+enable_confirmations = false
+# The values below match Supabase's defaults for hosted projects, so pushing this file leaves them alone.
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.sms]
+enable_confirmations = true
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[db.pooler]
+default_pool_size = 15
+max_client_conn = 200
+
+[storage.vector]
+enabled = false
+
+# These functions check who is calling themselves (a secret header for the scheduled jobs,
+# your login for "Sync now" and "Send a test", a private token for the calendar link),
+# so Supabase's default login check is turned off for them.
+[functions.sync]
+verify_jwt = false
+
+[functions.notify]
+verify_jwt = false
+
+[functions.calendar]
+verify_jwt = false

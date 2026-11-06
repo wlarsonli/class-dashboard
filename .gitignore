@@ -1,0 +1,8 @@
+# Never commit personal data or secrets. Those live in ../private, outside this repo.
+.env
+*.env
+.env.*
+private/
+supabase/.temp/
+supabase/.branches/
+.DS_Store
