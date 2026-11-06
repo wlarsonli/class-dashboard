@@ -63,7 +63,8 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
-html { -webkit-text-size-adjust: 100%; }
+/* touch-action: no double-tap zoom (pinch zoom still works) */
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
 
 body {
   margin: 0;
@@ -369,6 +370,11 @@ input:not([type]), input[type=text], input[type=email], input[type=url], input[t
   border: 1px solid var(--line); background: var(--surface-2); outline: none;
 }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--surface); }
+/* iPhone zooms in when you tap a text box whose text is under 16px, and the Home Screen app then
+   stays zoomed, so you have to swipe side to side. 16px text in form fields prevents that. */
+@media (pointer: coarse), (max-width: 760px) {
+  input, select, textarea { font-size: 16px; }
+}
 input:disabled { opacity: 0.5; }
 textarea { resize: vertical; line-height: 1.45; }
 .filters select, .field.inline select { width: auto; }
