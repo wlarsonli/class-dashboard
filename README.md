@@ -5,19 +5,31 @@ laptop and iPhone (added to the Home Screen) and syncs between them through Supa
 
 **Live:** https://wlarsonli.github.io/class-dashboard/
 · Supabase project `jiubqvyadpqyaksttvdl` (us-east-2)
-· Jobs: sync hourly at :07, notifications every 15 minutes
+· Jobs: Canvas and Outlook sync every 15 minutes, notifications every 15 minutes
 
 - **Today:** overdue and due-today items, work planned for today, the next 7 days, today's classes and
   Outlook events, countdowns to exams and big deadlines, and a term progress bar.
-- **Week:** a Monday–Sunday planner. It suggests which day to work on each task, based on your time
-  estimates, your study time per day, and your Outlook events. Drag a work session to another day, or tap
-  it on a phone, to move it.
+- **Plan → Day:** a timeline of your day. Classes, Outlook events, exams, and deadlines are shown, and
+  the planner fits work blocks into the free time between them, with breaks after each block.
+  - **Moving blocks:** tap a block to move it to another time or day. Blocks you place yourself stay put.
+  - **Re-planning:** when something changes in the app or in Outlook, the plan reshuffles around it.
+  - **Your own Outlook study blocks** (like "Math P-Set") count toward that class's work.
+- **Plan → Week:** Monday–Sunday at a glance, with how much work each day holds.
+- **Exam study plans:** exams get a set amount of study every day before them. The defaults are:
+  - Finals: 2 hours a day for 7 days
+  - Midterms: 2 hours a day for 5 days
+  - Quizzes: 1 hour a day for 3 days
+
+  You can change these in Settings, or on any exam.
 - **Classes:** a card for each class with meeting times, office hours (marked when they clash with your
   classes), links, policies, and progress.
 - **Tasks:** everything, with search and filters.
 - **Smart quick-add:** type `cs hw7 fri 6pm ~3h !` and it fills in the class, due date, time needed, and priority.
-- **Background jobs:** hourly Canvas and Outlook sync, a 7:30 am rundown, a 3 pm reminder about
-  planned work, and a calendar feed of your deadlines that Outlook can subscribe to.
+- **Background jobs:**
+  - A Canvas and Outlook sync every 15 minutes. The app also syncs when you open it.
+  - A 7:30 am rundown that includes today's work blocks and their times.
+  - A 3 pm reminder about work still ahead today.
+  - A calendar feed of your deadlines that Outlook can subscribe to.
 
 ## Folders
 

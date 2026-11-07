@@ -1,9 +1,10 @@
 import { byDue, chip, empty, ICON, section, taskRow } from '../components.js';
 import { addDays, countdown, DOW_LONG, fmtDate, fmtMinutes, fmtRange, MON_LONG, parseYmd, relDay, startOfDay, ymd } from '../dates.js';
-import { estimateOf, isStudyBlock, workloadWarnings } from '../planner.js';
+import { estimateOf, workloadWarnings } from '../planner.js';
 import { courseById, openTasks, state } from '../state.js';
-import { busyOn, meetingsOn, termInfo } from '../term.js';
+import { termInfo } from '../term.js';
 import { esc } from '../util.js';
+import { dayItems } from './day.js';
 
 function welcome() {
   return `<div class="page-head"><div><p class="eyebrow">Welcome</p><h1>Let's set up your dashboard</h1></div></div>
@@ -28,14 +29,17 @@ export function renderToday() {
   const dueToday = open.filter((t) => t.due_at && new Date(t.due_at) >= now && ymd(new Date(t.due_at)) === todayStr).sort(byDue);
   const shown = new Set([...overdue, ...dueToday].map((t) => t.id));
   const planned = open
-    .map((t) => ({ t, s: (t.plan || []).find((s) => s.date === todayStr) }))
-    .filter((x) => x.s && !shown.has(x.t.id))
-    .sort((a, b) => byDue(a.t, b.t));
+    .map((t) => {
+      const blocks = (t.plan || []).filter((s) => s.date === todayStr);
+      return { t, minutes: blocks.reduce((a, s) => a + s.minutes, 0), starts: blocks.filter((s) => s.start && !s.unscheduled).map((s) => s.start).sort() };
+    })
+    .filter((x) => x.minutes && !shown.has(x.t.id))
+    .sort((a, b) => (a.starts[0] || '99').localeCompare(b.starts[0] || '99') || byDue(a.t, b.t));
   const horizon = addDays(startOfDay(now), 8);
   const week = open.filter((t) => t.due_at && ymd(new Date(t.due_at)) > todayStr && new Date(t.due_at) < horizon).sort(byDue);
   const noDate = open.filter((t) => !t.due_at && t.type !== 'exam');
   const doneToday = state.tasks.filter((t) => !t.hidden && t.status === 'done' && t.done_at && ymd(new Date(t.done_at)) === todayStr);
-  const plannedMin = planned.reduce((a, x) => a + (x.s.minutes || 0), 0);
+  const plannedMin = planned.reduce((a, x) => a + x.minutes, 0);
   const list = (arr) => `<div class="task-list">${arr.map((t) => taskRow(t, { now })).join('')}</div>`;
 
   const head = `<div class="page-head">
@@ -69,8 +73,8 @@ export function renderToday() {
   const plannedCard = section(
     'Planned for today',
     planned.length
-      ? `<div class="task-list">${planned.map(({ t, s }) => taskRow(t, { now, planned: s.minutes })).join('')}</div>
-         <p class="foot">${esc(fmtMinutes(plannedMin))} of work planned. Move sessions around in <a href="#week">Week</a>.</p>`
+      ? `<div class="task-list">${planned.map(({ t, minutes, starts }) => taskRow(t, { now, planned: minutes, at: starts })).join('')}</div>
+         <p class="foot">${esc(fmtMinutes(plannedMin))} of work planned. See or move it in <a href="#day">Plan</a>.</p>`
       : empty('No work sessions planned for today.'),
     { count: planned.length || null, cls: 'o-5' },
   );
@@ -81,33 +85,35 @@ export function renderToday() {
   const doneCard = doneToday.length ? section('Done today', list(doneToday), { count: doneToday.length, cls: 'o-9 tone-done' }) : '';
   const noDateCard = noDate.length ? section('No due date', list(noDate), { count: noDate.length, cls: 'o-10' }) : '';
 
-  // Schedule: classes plus Outlook events
-  const classes = meetingsOn(todayStr, state);
-  const events = busyOn(todayStr, state).filter((b) => !b.all_day);
-  const items = [
-    ...classes.map((m) => ({
-      start: m.start,
-      end: m.end,
-      html: `${chip(m.course)}<span class="ev-title">${esc(m.meeting.kind)}</span>${m.note ? `<span class="tag">${esc(m.note)}</span>` : ''}`,
-      where: m.location,
-    })),
-    ...events.map((b) => ({
-      start: new Date(b.starts_at),
-      end: new Date(b.ends_at),
-      html: `<span class="ev-dot${isStudyBlock(b) ? ' study' : ''}"></span><span class="ev-title">${esc(b.title)}</span>`,
-      where: b.location,
-    })),
-  ].sort((a, b) => a.start - b.start);
+  // Schedule: classes, Outlook events, exams, and the work blocks the planner scheduled.
+  const at = (m) => {
+    const d = startOfDay(now);
+    d.setMinutes(m);
+    return d;
+  };
+  const items = dayItems(todayStr, now)
+    .items.sort((a, b) => a.s - b.s)
+    .map((i) => {
+      const c = i.id ? courseById(openTasks().find((t) => t.id === i.id)?.course_id) : null;
+      let html;
+      if (i.kind === 'class') html = `<span class="ev-title">${esc(i.title)}</span>`;
+      else if (i.kind.startsWith('work')) html = `${chip(c, { small: true })}<span class="ev-title">${esc(i.title)}</span><span class="tag">work</span>`;
+      else if (i.kind === 'exam') html = `<span class="ev-title">${esc(i.title)}</span><span class="tag exam-tag">exam</span>`;
+      else html = `<span class="ev-dot${i.kind.includes('study') ? ' study' : ''}"></span><span class="ev-title">${esc(i.title)}</span>`;
+      const where = i.kind === 'class' || i.kind === 'exam' ? i.sub : i.kind.includes('study') ? i.sub : '';
+      const action = i.kind.startsWith('work') ? ` data-action="block" data-id="${i.id}" data-date="${i.date}" data-start="${i.start}"` : '';
+      return { start: at(i.s), end: at(i.e), html, where, action, cls: i.kind.split(' ')[0], color: i.color };
+    });
   const schedule = items.length
     ? `<ol class="schedule">${items
         .map(
-          (it) => `<li class="${it.end < now ? 'past' : it.start <= now ? 'now' : ''}">
+          (it) => `<li class="${it.end < now ? 'past' : it.start <= now ? 'now' : ''} sched-${it.cls}"${it.color ? ` style="--c:${esc(it.color)}"` : ''}${it.action}>
             <span class="ev-time">${esc(fmtRange(it.start, it.end))}</span>
             <span class="ev-main">${it.html}${it.where ? `<span class="ev-where">${esc(it.where)}</span>` : ''}</span>
           </li>`,
         )
-        .join('')}</ol>`
-    : empty(term?.phase === 'break' ? `No classes: ${term.label}.` : 'No classes today.');
+        .join('')}</ol><p class="foot"><a href="#day">Open the full day</a></p>`
+    : empty(term?.phase === 'break' ? `Nothing scheduled: ${term.label}.` : 'Nothing scheduled today.');
   const scheduleCard = section("Today's schedule", schedule, { cls: 'o-4' });
 
   const big = open

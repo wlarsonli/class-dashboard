@@ -326,6 +326,67 @@ h2.sub { font-size: 18px; margin: 28px 0 12px; }
 .session small svg { width: 12px; height: 12px; }
 .day-empty { color: var(--faint); font-size: 13px; }
 
+.day-link { border: 0; background: none; padding: 0; cursor: pointer; text-align: left; border-radius: 8px; }
+.day-link:hover .day-num { color: var(--accent-ink); }
+.session.unplaced { outline: 2px dashed var(--soon); outline-offset: -2px; }
+a.seg-link, .seg.pills a { display: inline-block; padding: 6px 13px; border-radius: 999px; font-weight: 650; color: var(--muted); text-decoration: none; }
+.seg.pills a.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgb(0 0 0 / 0.08); }
+
+/* ---------- Day plan (timeline) ---------- */
+
+.allday { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.day-unplaced { margin-bottom: 14px; }
+.day-unplaced .unplaced { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.timeline { display: grid; grid-template-columns: 60px minmax(0, 1fr); padding: 16px 12px 16px 4px; margin-top: 12px; }
+.tl-hours, .tl-lanes { position: relative; height: var(--h); }
+.tl-hour { position: absolute; right: 10px; transform: translateY(-50%); font-size: 11.5px; font-weight: 650; color: var(--faint); white-space: nowrap; }
+.tl-lanes {
+  background-image: repeating-linear-gradient(to bottom, var(--line) 0 1px, transparent 1px var(--hour));
+  border-left: 1px solid var(--line);
+}
+.tl-item {
+  --c: var(--accent);
+  position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 1px; overflow: hidden;
+  padding: 4px 8px; border: 0; border-radius: 10px; text-align: left; font-size: 12.5px; line-height: 1.25; color: var(--text);
+}
+.tl-item.short { flex-direction: row; align-items: center; gap: 6px; padding-top: 2px; padding-bottom: 2px; }
+.tl-title { font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 100%; }
+.tl-time { opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tl-item.class { background: color-mix(in oklab, var(--c) 62%, var(--surface)); color: color-mix(in oklab, var(--c) 25%, var(--ink-base)); }
+.tl-item.event { background: var(--surface-2); color: var(--muted); border: 1px dashed color-mix(in srgb, var(--faint) 60%, transparent); }
+.tl-item.event.study { background: color-mix(in oklab, var(--c) 16%, var(--surface)); color: var(--text); border: 1.5px dashed color-mix(in oklab, var(--c) 75%, var(--ink-base) 10%); }
+.tl-item.exam { background: var(--overdue-bg); color: var(--overdue); border: 1.5px solid currentColor; cursor: pointer; }
+.tl-item.work {
+  cursor: pointer; background: color-mix(in oklab, var(--c) 30%, var(--surface));
+  border-left: 5px solid color-mix(in oklab, var(--c) 80%, var(--ink-base) 12%);
+  box-shadow: 0 1px 2px rgb(60 40 80 / 0.08);
+}
+.tl-item.work:hover { background: color-mix(in oklab, var(--c) 42%, var(--surface)); }
+.tl-item.work.fixed { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--c) 80%, var(--ink-base) 12%); }
+.tl-due { position: absolute; left: 0; right: 0; z-index: 2; height: 0; padding: 0; border: 0; border-top: 2px solid var(--c); background: none; pointer-events: none; }
+.tl-due span {
+  position: absolute; right: 6px; top: -11px; pointer-events: auto; cursor: pointer;
+  padding: 1px 9px; border-radius: 999px; background: var(--surface); border: 1.5px solid var(--c);
+  font-size: 11.5px; font-weight: 750; white-space: nowrap; max-width: 85%; overflow: hidden; text-overflow: ellipsis;
+}
+.tl-due.is-done span { text-decoration: line-through; opacity: 0.6; }
+.tl-now { position: absolute; left: -5px; right: 0; z-index: 3; height: 0; border-top: 2px solid var(--overdue); pointer-events: none; }
+.tl-now::before { content: ''; position: absolute; left: -1px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: var(--overdue); }
+.tl-now span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.schedule li.sched-work { cursor: pointer; border-radius: 10px; }
+.schedule li.sched-work:hover { background: var(--surface-2); }
+.exam-tag { background: var(--overdue-bg); color: var(--overdue); }
+.planned-at { color: var(--accent-ink); font-weight: 650; }
+.time-move { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 4px; }
+.time-move input { width: auto; }
+.study-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.study-row input[type=number] { width: 84px; }
+.study-row input[type=date] { width: auto; }
+.prep-rows { display: grid; gap: 8px; }
+.prep-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.prep-row > span { min-width: 170px; font-weight: 650; }
+.prep-row input { width: 80px; }
+
 /* ---------- Classes ---------- */
 
 .course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
@@ -407,7 +468,7 @@ dialog::backdrop { background: rgb(35 25 55 / 0.36); -webkit-backdrop-filter: bl
 .confirm-text { font-weight: 650; }
 .due-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; }
 .plan-rows, .link-rows, .meet-rows, .oh-rows, .break-rows { display: grid; gap: 8px; }
-.plan-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px auto 30px; gap: 8px; align-items: center; }
+.plan-row { display: grid; grid-template-columns: minmax(0, 1fr) 118px 110px auto 30px; gap: 8px; align-items: center; }
 .plan-flag { font-size: 12px; color: var(--faint); font-weight: 650; white-space: nowrap; }
 .sub-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .sub-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 30px; gap: 8px; align-items: center; }
@@ -506,8 +567,12 @@ dialog::backdrop { background: rgb(35 25 55 / 0.36); -webkit-backdrop-filter: bl
   .grid5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .due-row { grid-template-columns: 1fr 1fr; }
   .due-row .check-inline { grid-column: 1 / -1; }
-  .plan-row { grid-template-columns: minmax(0, 1fr) 100px 30px; }
+  .plan-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 30px; }
+  .plan-row select { grid-column: 1 / 3; }
   .plan-flag { display: none; }
+  .timeline { grid-template-columns: 50px minmax(0, 1fr); padding-right: 8px; }
+  .tl-hour { right: 6px; font-size: 11px; }
+  .prep-row > span { min-width: 100%; }
   .course-grid, .course-grid.cats { grid-template-columns: 1fr; }
   .schedule li { grid-template-columns: 112px minmax(0, 1fr); }
   dialog.sheet, dialog.sheet:has(.wide) {

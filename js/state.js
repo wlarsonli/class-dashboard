@@ -1,6 +1,6 @@
 // App state and every action that changes data.
 import { addDays, atTime, hhmm, ymd } from './dates.js';
-import { planTasks } from './planner.js';
+import { byBlock, planAndSchedule } from './planner.js';
 import { parseQuickAdd } from './quickadd.js';
 import { createStore, defaultSettings, mergeSettings, row } from './store.js';
 import { clone, download, toast, uid } from './util.js';
@@ -18,6 +18,7 @@ export const state = {
   offline: false,
   view: 'today',
   weekOffset: 0,
+  dayOffset: 0,
   filter: { q: '', course: '', status: 'open', type: '' },
 };
 
@@ -37,9 +38,8 @@ const upsertLocal = (arr, item) => {
   if (i >= 0) arr[i] = item;
   else arr.push(item);
 };
-const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-
 const SNAP_KEY = 'class-dashboard:snapshot:v1';
+const PLANNER_VERSION = 2; // bump to re-plan everything once after the planner changes
 
 export async function refresh({ silent = false } = {}) {
   try {
@@ -59,8 +59,29 @@ export async function refresh({ silent = false } = {}) {
     if (!silent) toast(snap ? "You're offline. Showing your last saved copy." : `Couldn't load your data: ${err.message || err}`);
   }
   state.ready = true;
-  await autoPlan();
+  if (!state.offline && (state.settings.planner_version || 0) < PLANNER_VERSION && state.tasks.length) {
+    // The planner changed: re-plan everything once (blocks you placed yourself stay put).
+    await autoPlan('rebalance');
+    state.settings = mergeSettings({ ...state.settings, planner_version: PLANNER_VERSION });
+    await persist(() => store.saveSettings(state.settings));
+  } else {
+    await autoPlan();
+  }
   rerender();
+}
+
+/** Pulls fresh Canvas and Outlook data if the last sync is more than 15 minutes old. */
+export async function syncIfStale() {
+  if (store.mode !== 'cloud' || state.offline) return;
+  const last = state.integrations?.last_sync_at ? new Date(state.integrations.last_sync_at) : null;
+  if (!(state.integrations?.canvas_feed_url || state.integrations?.outlook_feed_url)) return;
+  if (last && Date.now() - last < 15 * 60000) return;
+  try {
+    await store.invoke('sync', {});
+    await refresh({ silent: true });
+  } catch (err) {
+    console.warn('Background sync failed', err);
+  }
 }
 
 async function persist(fn) {
@@ -78,9 +99,12 @@ async function persist(fn) {
   }
 }
 
-/** Plans anything that has no upcoming work sessions ('fill') or re-plans everything ('rebalance'). */
+/**
+ * Picks days and times for work ('fill' adds what's missing and re-fits the times around
+ * anything new; 'rebalance' re-plans everything that isn't pinned).
+ */
 export async function autoPlan(mode = 'fill') {
-  const changes = planTasks(state, { mode });
+  const changes = planAndSchedule(state, { mode });
   const updated = [];
   for (const [id, plan] of changes) {
     const t = taskById(id);
@@ -104,8 +128,8 @@ export const newTask = (fields = {}) => row('tasks', { id: uid(), ...fields });
 export async function saveTask(task) {
   const prev = task.id ? taskById(task.id) : null;
   const t = row('tasks', { ...task, id: task.id || uid(), title: (task.title || '').trim() || 'Untitled task' });
-  // A new due date or estimate means the old suggested plan is stale (your own pinned sessions stay).
-  if (prev && (prev.due_at !== t.due_at || prev.estimate_minutes !== t.estimate_minutes)) {
+  // A new due date, estimate, or study plan means the old suggested plan is stale (your own pinned blocks stay).
+  if (prev && (prev.due_at !== t.due_at || prev.estimate_minutes !== t.estimate_minutes || JSON.stringify(prev.study) !== JSON.stringify(t.study))) {
     const today = ymd(new Date());
     t.plan = (t.plan || []).filter((s) => s.pinned || s.date < today);
   }
@@ -228,25 +252,71 @@ export async function quickAdd(text) {
   });
 }
 
-/** Moves one planned session to another day and pins it there. */
+async function savePlan(t, plan) {
+  t.plan = plan.sort(byBlock);
+  await persist(() => store.saveTasks([t]));
+  await autoPlan(); // re-fits the times around the change
+  rerender();
+}
+
+/** Week view: moves a task's work on one day to another day (the planner picks the time). */
 export async function moveSession(taskId, fromDate, toDate) {
   const t = taskById(taskId);
   if (!t || fromDate === toDate) return;
+  const moving = (t.plan || []).filter((s) => s.date === fromDate);
+  if (!moving.length) return;
+  const rest = (t.plan || []).filter((s) => s.date !== fromDate);
+  const minutes = moving.reduce((a, s) => a + s.minutes, 0);
+  await savePlan(t, [...rest, { date: toDate, minutes, pinned: true }]);
+}
+
+/** Day view: moves one block to another time and/or day. With a time it's fixed there. */
+export async function moveBlock(taskId, date, start, { toDate = date, toStart = null } = {}) {
+  const t = taskById(taskId);
+  if (!t) return;
   const plan = (t.plan || []).map((s) => ({ ...s }));
-  const s = plan.find((x) => x.date === fromDate);
-  if (!s) return;
-  const target = plan.find((x) => x.date === toDate);
-  if (target) {
-    target.minutes += s.minutes;
-    target.pinned = true;
-    plan.splice(plan.indexOf(s), 1);
+  const b = plan.find((s) => s.date === date && (s.start || null) === (start || null));
+  if (!b) return;
+  b.date = toDate;
+  b.pinned = true;
+  b.unscheduled = false;
+  if (toStart) {
+    b.start = toStart;
+    b.fixed = true;
   } else {
-    s.date = toDate;
-    s.pinned = true;
+    delete b.start;
+    b.fixed = false;
   }
-  t.plan = plan.sort(byDate);
-  await persist(() => store.saveTasks([t]));
-  rerender();
+  await savePlan(t, plan);
+}
+
+/** Lets the planner choose this block's time again (undoes a time you set yourself). */
+export async function unfixBlock(taskId, date, start) {
+  const t = taskById(taskId);
+  if (!t) return;
+  const plan = (t.plan || []).map((s) => (s.date === date && s.start === start ? { date: s.date, minutes: s.minutes, pinned: s.pinned } : { ...s }));
+  await savePlan(t, plan);
+}
+
+/**
+ * Removes one block (start '*': all of that day's blocks for the task). For exam study,
+ * that day is skipped instead of being planned again.
+ */
+export async function removeBlock(taskId, date, start) {
+  const t = taskById(taskId);
+  if (!t) return;
+  const hit = (s) => s.date === date && (start === '*' || (s.start || null) === (start || null));
+  const plan = (t.plan || []).filter((s) => !hit(s));
+  if (t.type === 'exam') {
+    const skip = [...new Set([...(t.study?.skip || []), date])];
+    t.study = { ...(t.study || {}), skip };
+  } else {
+    // Keep the rest where they are so the planner doesn't simply put it back.
+    plan.forEach((s) => {
+      if (s.date >= ymd(new Date())) s.pinned = true;
+    });
+  }
+  await savePlan(t, plan);
 }
 
 export async function replan() {

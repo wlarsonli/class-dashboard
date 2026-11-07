@@ -1,6 +1,6 @@
 // Small HTML builders shared by the screens.
-import { dayDiff, fmtMinutes, fmtTime, relDay } from './dates.js';
-import { estimateOf } from './planner.js';
+import { atTime, dayDiff, fmtMinutes, fmtTime, relDay } from './dates.js';
+import { estimateOf, studyPlanOf } from './planner.js';
 import { courseById, state } from './state.js';
 import { esc } from './util.js';
 
@@ -51,16 +51,21 @@ export function dueText(t, now = new Date()) {
 
 const PRIORITY = ['', 'Low', 'Med', 'High'];
 
-export function taskRow(t, { now = new Date(), planned = 0, compact = false } = {}) {
+export function taskRow(t, { now = new Date(), planned = 0, at = [], compact = false } = {}) {
   const c = courseById(t.course_id);
   const u = urgency(t, now);
   const done = t.status === 'done';
   const subs = t.subtasks || [];
+  const study = studyPlanOf(t, state.settings);
   const meta = [];
   if (!compact) meta.push(chip(c));
   meta.push(`<span class="due ${u}">${esc(dueText(t, now))}</span>`);
-  if (planned) meta.push(`<span>${esc(fmtMinutes(planned))} planned today</span>`);
-  else if (!done && t.type !== 'event') {
+  if (planned) {
+    const when = at.length ? `${at.map((s) => fmtTime(atTime('2000-01-01', s))).join(', ')} · ` : '';
+    meta.push(`<span class="planned-at">${esc(when)}${esc(fmtMinutes(planned))} planned today</span>`);
+  } else if (study && !done) {
+    meta.push(`<span>Study ${esc(fmtMinutes(study.daily))} a day</span>`);
+  } else if (!done && t.type !== 'event') {
     const est = estimateOf(t, state.settings);
     if (est) meta.push(`<span>${esc(fmtMinutes(est))}</span>`);
   }

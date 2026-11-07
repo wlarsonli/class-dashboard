@@ -1,20 +1,22 @@
 // Starts the app: sign-in, routing between screens, and all the click/submit handling.
-import { openCourseEditor, openSessionMenu, openTaskEditor } from './editor.js';
+import { openBlockMenu, openCourseEditor, openSessionMenu, openTaskEditor } from './editor.js';
 import { enablePush, registerSW } from './push.js';
 import { describeQuickAdd, parseQuickAdd } from './quickadd.js';
 import {
   courseById, exportData, importData, moveSession, onRender, quickAdd, refresh, replan, rerender, saveIntegrations, saveSettings,
-  state, store, taskById, toggleDone,
+  state, store, syncIfStale, taskById, toggleDone,
 } from './state.js';
 import { $, $$, esc, toast } from './util.js';
 import { renderClasses } from './views/classes.js';
+import { renderDay } from './views/day.js';
 import { renderSettings } from './views/settings.js';
 import { renderTasks } from './views/tasks.js';
 import { renderToday } from './views/today.js';
 import { renderWeek } from './views/week.js';
 
-const VIEWS = { today: renderToday, week: renderWeek, classes: renderClasses, tasks: renderTasks, settings: renderSettings };
-const TITLES = { today: 'Today', week: 'Week', classes: 'Classes', tasks: 'Tasks', settings: 'Settings' };
+const VIEWS = { today: renderToday, day: renderDay, week: renderWeek, classes: renderClasses, tasks: renderTasks, settings: renderSettings };
+const TITLES = { today: 'Today', day: 'Day plan', week: 'Week plan', classes: 'Classes', tasks: 'Tasks', settings: 'Settings' };
+const NAV_OF = { day: 'plan', week: 'plan' };
 const main = document.getElementById('view');
 const modal = document.getElementById('modal');
 let quickDraft = '';
@@ -61,6 +63,8 @@ function render() {
   }
   const view = viewFromHash();
   const changed = view !== state.view;
+  // Opening the Plan tab shows today, unless you tapped a specific day in the week view.
+  if (changed && view === 'day' && state.view !== 'week') state.dayOffset = 0;
   state.view = view;
   const active = document.activeElement;
   const focusId = active && main.contains(active) ? active.id : '';
@@ -70,7 +74,7 @@ function render() {
   main.innerHTML = VIEWS[view]();
 
   $$('[data-nav]').forEach((a) => {
-    const on = a.dataset.nav === view;
+    const on = a.dataset.nav === (NAV_OF[view] || view);
     a.classList.toggle('active', on);
     if (on) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
@@ -165,6 +169,24 @@ const ACTIONS = {
   open: (el) => openTaskEditor(taskById(el.dataset.id)),
   'new-task': (el) => openTaskEditor(null, { course: el.dataset.course || null }),
   session: (el) => openSessionMenu(el.dataset.id, el.dataset.date),
+  block: (el) => openBlockMenu(el.dataset.id, el.dataset.date, el.dataset.start),
+  'day-prev': () => {
+    state.dayOffset -= 1;
+    rerender();
+  },
+  'day-next': () => {
+    state.dayOffset += 1;
+    rerender();
+  },
+  'day-today': () => {
+    state.dayOffset = 0;
+    rerender();
+  },
+  'open-day': (el) => {
+    state.dayOffset = parseInt(el.dataset.offset, 10) || 0;
+    if (location.hash === '#day') rerender();
+    else location.hash = '#day';
+  },
   'week-prev': () => {
     state.weekOffset -= 1;
     rerender();
@@ -249,19 +271,28 @@ const FORMS = {
   },
   async planning(fd) {
     const m = (k) => Math.max(0, Math.round(parseFloat(fd.get(k) || '0') * 60));
+    const prep = (k) => ({ daily: m(`prep_${k}_daily`), days: Math.max(1, parseInt(fd.get(`prep_${k}_days`), 10) || 1) });
+    const start = fd.get('win_start') || '08:00';
+    const weekend = fd.get('win_weekend') || start;
+    const end = fd.get('win_end') || '23:00';
+    if (end <= start || end <= weekend) {
+      toast('The end of your work hours has to be after the start.');
+      return;
+    }
     await saveSettings({
       capacity: { weekday: m('cap_weekday'), weekend: m('cap_weekend') },
       workload: { ...state.settings.workload, deadlines: parseInt(fd.get('wl_deadlines'), 10) || 3 },
+      study_window: { start, end, weekend_start: weekend },
+      exam_prep: { final: prep('final'), midterm: prep('midterm'), quiz: prep('quiz') },
       default_estimates: {
         ...state.settings.default_estimates,
         assignment: m('est_assignment'),
         essay: m('est_essay'),
         reading: m('est_reading'),
-        exam: m('est_exam'),
         task: m('est_task'),
       },
     });
-    toast('Planning settings saved.');
+    toast('Planning settings saved. Your plan was updated.');
   },
   async term(fd) {
     const breaks = [];
@@ -404,8 +435,13 @@ async function start() {
   }
   if (!signedIn) return renderSignIn();
   await refresh();
+  syncIfStale(); // pick up anything new in Outlook or Canvas, then re-plan around it
   setInterval(() => document.visibilityState === 'visible' && backgroundRefresh(), 120000);
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && backgroundRefresh());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    backgroundRefresh();
+    syncIfStale();
+  });
 }
 
 start();

@@ -1,9 +1,10 @@
 // Pop-up editors: tasks, classes, and the "move this work session" menu.
 import { TYPE_LABEL } from './components.js';
-import { addDays, atTime, DOW, fmtDate, fmtMinutes, hhmm, parseYmd, relDay, ymd } from './dates.js';
-import { estimateOf, planTasks } from './planner.js';
+import { addDays, atTime, DOW, fmtDate, fmtMinutes, fmtRange, hhmm, parseYmd, relDay, ymd } from './dates.js';
+import { estimateOf, planAndSchedule, studyDays, studyPlanOf } from './planner.js';
 import {
-  createSeries, deleteCourse, deleteTask, moveSession, newTask, saveCourse, saveSeriesFrom, saveTask, state, taskById, toggleDone,
+  createSeries, deleteCourse, deleteTask, moveBlock, moveSession, newTask, removeBlock, saveCourse, saveSeriesFrom, saveTask, state, taskById,
+  toggleDone, unfixBlock,
 } from './state.js';
 import { clone, esc, uid } from './util.js';
 
@@ -33,10 +34,11 @@ const removeBtn = (what) => `<button type="button" class="btn icon small" data-r
 
 function sessionRow(s) {
   const opts = [...new Set([...MINUTES, s.minutes])].sort((a, b) => a - b);
-  return `<div class="plan-row" data-pinned="${s.pinned ? 'true' : 'false'}">
+  return `<div class="plan-row" data-pinned="${s.pinned ? 'true' : 'false'}" data-fixed="${s.fixed ? 'true' : 'false'}">
     <input type="date" value="${esc(s.date)}" aria-label="Day">
+    <input type="time" value="${esc(s.unscheduled ? '' : s.start || '')}" aria-label="Start time (empty: the planner picks)">
     <select aria-label="How long">${opts.map((m) => `<option value="${m}"${m === s.minutes ? ' selected' : ''}>${esc(fmtMinutes(m))}</option>`).join('')}</select>
-    <span class="plan-flag">${s.pinned ? 'set by you' : 'suggested'}</span>
+    <span class="plan-flag">${s.fixed ? 'time set by you' : s.pinned ? 'day set by you' : 'suggested'}</span>
     ${removeBtn('session')}
   </div>`;
 }
@@ -72,15 +74,23 @@ function readPlan(form) {
   for (const r of form.querySelectorAll('.plan-row')) {
     const date = r.querySelector('input[type=date]').value;
     if (!date) continue;
-    const minutes = +r.querySelector('select').value;
-    const pinned = r.dataset.pinned === 'true';
-    const same = out.find((s) => s.date === date);
-    if (same) {
-      same.minutes += minutes;
-      same.pinned = same.pinned || pinned;
-    } else out.push({ date, minutes, pinned });
+    const start = r.querySelector('input[type=time]').value;
+    const fixed = r.dataset.fixed === 'true' && !!start;
+    const block = { date, minutes: +r.querySelector('select').value, pinned: r.dataset.pinned === 'true' || fixed };
+    if (start) block.start = start;
+    if (fixed) block.fixed = true;
+    out.push(block);
   }
-  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+  return out.sort((a, b) => (a.date + (a.start || '')).localeCompare(b.date + (b.start || '')));
+}
+
+/** "Every day from Fri Nov 6 to Wed Nov 11 · 12 h in total" */
+function studySummary(t, daily, start) {
+  const plan = studyPlanOf({ ...t, study: { daily, start, skip: t.study?.skip || [] } }, state.settings);
+  if (!plan) return 'Add the exam date first.';
+  const days = studyDays(plan, plan.start);
+  if (!days.length) return 'No study days before the exam.';
+  return `Every day from ${fmtDate(parseYmd(days[0]))} to ${fmtDate(parseYmd(days[days.length - 1]))} · ${fmtMinutes(daily * days.length)} in total`;
 }
 
 function collectTask(form, t, { validate }) {
@@ -122,6 +132,10 @@ function collectTask(form, t, { validate }) {
       .filter((l) => l.url),
     plan: [...(t.plan || []).filter((s) => s.date < today), ...readPlan(form)],
     estimated_date: !!t.estimated_date && t.due_at === due_at,
+    study:
+      type === 'exam' && form.dataset.studyTouched === 'true'
+        ? { daily: Math.max(0, Math.round(parseFloat(el.study_daily.value || '0') * 60)), start: el.study_start.value || null, skip: t.study?.skip || [] }
+        : t.study ?? null,
   };
 }
 
@@ -142,6 +156,9 @@ export function openTaskEditor(task, prefill = {}) {
     .map((p) => `<label><input type="radio" name="priority" value="${p}"${(t.priority || 0) === p ? ' checked' : ''}><span>${['None', 'Low', 'Med', 'High'][p]}</span></label>`)
     .join('');
   const hours = (m) => Math.round((m / 60) * 100) / 100;
+  const isExam = t.type === 'exam';
+  const study = studyPlanOf({ ...t, type: 'exam' }, state.settings);
+  const studyDaily = study?.daily ?? state.settings.exam_prep?.midterm?.daily ?? 120;
 
   const html = `<form class="sheet-form" novalidate>
     <header class="sheet-head"><h2>${isNew ? 'New task' : 'Edit task'}</h2><button type="button" class="btn icon" data-close aria-label="Close">×</button></header>
@@ -162,13 +179,21 @@ export function openTaskEditor(task, prefill = {}) {
         <label class="field"><span>Length (minutes)</span><input type="number" name="duration_minutes" min="0" step="5" value="${t.duration_minutes ?? ''}"></label>
         <label class="field"><span>Location</span><input name="location" value="${esc(t.location || '')}"></label>
       </div>
+      <fieldset class="field study-only"${isExam ? '' : ' hidden'}><legend>Study plan</legend>
+        <div class="study-row">
+          <label class="field inline"><span>Study</span><input type="number" name="study_daily" min="0" max="12" step="0.25" value="${hours(studyDaily)}" aria-label="Hours a day"><span>hours a day, starting</span></label>
+          <input type="date" name="study_start" value="${esc(study?.start || '')}" aria-label="First study day">
+        </div>
+        <p class="hint study-summary">${esc(isExam && study ? studySummary(t, studyDaily, study.start) : 'Set the exam date and the planner spreads your studying over the days before it.')}</p>
+      </fieldset>
       <div class="grid2">
-        <label class="field"><span>Time needed (hours)</span><input type="number" name="estimate_hours" min="0" max="60" step="0.25" value="${t.estimate_minutes === null || t.estimate_minutes === undefined ? '' : hours(t.estimate_minutes)}" placeholder="${hours(defaultEst)} (default)"></label>
+        <label class="field not-exam"${isExam ? ' hidden' : ''}><span>Time needed (hours)</span><input type="number" name="estimate_hours" min="0" max="60" step="0.25" value="${t.estimate_minutes === null || t.estimate_minutes === undefined ? '' : hours(t.estimate_minutes)}" placeholder="${hours(defaultEst)} (default)"></label>
         <fieldset class="field"><legend>Priority</legend><div class="seg radios">${prio}</div></fieldset>
       </div>
       <fieldset class="field"><legend>Work sessions</legend>
         <div class="plan-rows">${futurePlan.map(sessionRow).join('') || '<p class="hint plan-empty">Once the task has a due date, the planner picks days for you.</p>'}</div>
-        <div class="row-gap"><button type="button" class="btn small" data-add-session>+ Add a session</button><button type="button" class="btn small" data-suggest>Suggest days</button></div>
+        <div class="row-gap"><button type="button" class="btn small" data-add-session>+ Add a session</button><button type="button" class="btn small" data-suggest>Suggest days and times</button></div>
+        <p class="hint">Leave the time empty and the planner fits the session around your classes and Outlook events.</p>
       </fieldset>
       <fieldset class="field"><legend>Steps</legend>
         <ul class="sub-rows">${(t.subtasks || []).map(subRow).join('')}</ul>
@@ -199,9 +224,25 @@ export function openTaskEditor(task, prefill = {}) {
     const el = form.elements;
     const q = (s) => form.querySelector(s);
 
+    const refreshStudy = () => {
+      const draft = collectTask(form, t, { validate: false }) || t;
+      const s = studyPlanOf({ ...draft, type: 'exam', study: form.dataset.studyTouched === 'true' ? draft.study : t.study }, state.settings);
+      if (s && !el.study_start.value) el.study_start.value = s.start;
+      q('.study-summary').textContent = s ? studySummary(draft, Math.round(parseFloat(el.study_daily.value || '0') * 60), el.study_start.value || s.start) : 'Set the exam date first.';
+    };
     el.type.addEventListener('change', () => {
       q('.exam-only').hidden = !['exam', 'event'].includes(el.type.value);
+      q('.study-only').hidden = el.type.value !== 'exam';
+      q('.not-exam').hidden = el.type.value === 'exam';
+      if (el.type.value === 'exam') refreshStudy();
     });
+    for (const name of ['study_daily', 'study_start']) {
+      el[name].addEventListener('input', () => {
+        form.dataset.studyTouched = 'true';
+        refreshStudy();
+      });
+    }
+    el.due_date.addEventListener('change', () => el.type.value === 'exam' && refreshStudy());
     const syncDue = () => {
       el.due_date.disabled = el.no_due.checked;
       el.due_time.disabled = el.no_due.checked;
@@ -239,14 +280,15 @@ export function openTaskEditor(task, prefill = {}) {
       const r = e.target.closest('.plan-row');
       if (!r) return;
       r.dataset.pinned = 'true';
-      r.querySelector('.plan-flag').textContent = 'set by you';
+      if (e.target.type === 'time') r.dataset.fixed = e.target.value ? 'true' : 'false';
+      r.querySelector('.plan-flag').textContent = r.dataset.fixed === 'true' ? 'time set by you' : 'day set by you';
     });
     q('[data-suggest]').addEventListener('click', () => {
       const draft = collectTask(form, t, { validate: false });
       if (!draft.due_at) return showError(form, 'Add a due date first, then the planner can suggest days.');
       draft.plan = draft.plan.filter((s) => s.date < today || s.pinned);
       const tasks = state.tasks.filter((x) => x.id !== draft.id).concat([draft]);
-      const plan = (planTasks({ ...state, tasks }, { mode: 'rebalance', only: draft.id }).get(draft.id) || draft.plan).filter((s) => s.date >= today);
+      const plan = (planAndSchedule({ ...state, tasks }, { mode: 'rebalance', only: draft.id }).get(draft.id) || draft.plan).filter((s) => s.date >= today);
       planRows.innerHTML = plan.map(sessionRow).join('') || '<p class="hint plan-empty">Nothing to plan: this task needs no time, or the due date has passed.</p>';
     });
 
@@ -305,27 +347,37 @@ const shortDay = (d) => {
   return r === 'Today' || r === 'Tomorrow' ? r : `${DOW[dt.getDay()]} ${dt.getDate()}`;
 };
 
-/** Tap a work session in the week view: move it, remove it, or open the task. */
-export function openSessionMenu(taskId, date) {
-  const t = taskById(taskId);
-  const s = t && (t.plan || []).find((x) => x.date === date);
-  if (!s) return;
+/** Days you can move a task's work to: from today up to its due date (at most two weeks). */
+function moveDays(t) {
   const today = ymd(new Date());
   const lastDay = t.due_at && ymd(new Date(t.due_at)) >= today ? ymd(new Date(t.due_at)) : ymd(addDays(new Date(), 6));
   const days = [];
   for (let d = parseYmd(today); ymd(d) <= lastDay && days.length < 14; d = addDays(d, 1)) days.push(ymd(d));
-  const future = (t.plan || []).filter((x) => x.date >= today).length;
+  return days;
+}
+
+const workName = (t) => (t.type === 'exam' ? `Study: ${t.title}` : t.title);
+
+/** Tap a task's work in the week view: move that day's work to another day, remove it, or open the task. */
+export function openSessionMenu(taskId, date) {
+  const t = taskById(taskId);
+  const blocks = (t?.plan || []).filter((x) => x.date === date);
+  if (!blocks.length) return;
+  const minutes = blocks.reduce((a, s) => a + s.minutes, 0);
+  const days = moveDays(t);
+  const isExam = t.type === 'exam';
   open(
     `<div class="sheet-form small">
-      <header class="sheet-head"><h2>${esc(t.title)}</h2><button type="button" class="btn icon" data-close aria-label="Close">×</button></header>
+      <header class="sheet-head"><h2>${esc(workName(t))}</h2><button type="button" class="btn icon" data-close aria-label="Close">×</button></header>
       <div class="sheet-body">
-        <p>${esc(fmtMinutes(s.minutes))} planned for ${esc(fmtDate(parseYmd(date), { long: true }))}. Move it to:</p>
+        <p>${esc(fmtMinutes(minutes))} planned for ${esc(fmtDate(parseYmd(date), { long: true }))}. Move it to:</p>
         <div class="day-pick">${days
           .map((d) => `<button type="button" class="btn${d === date ? ' active' : ''}" data-move="${d}"${d === date ? ' disabled' : ''}>${esc(shortDay(d))}</button>`)
           .join('')}</div>
+        <p class="hint">The planner picks the time on the new day.</p>
       </div>
       <footer class="sheet-foot">
-        ${future > 1 ? '<button type="button" class="btn ghost danger" data-remove-session>Remove this session</button>' : ''}
+        <button type="button" class="btn ghost danger" data-remove>${isExam ? 'Skip studying this day' : 'Remove'}</button>
         <span class="spacer"></span>
         <button type="button" class="btn" data-open-task>Open task</button>
       </footer>
@@ -338,13 +390,66 @@ export function openSessionMenu(taskId, date) {
         }),
       );
       d.querySelector('[data-open-task]').addEventListener('click', () => openTaskEditor(taskById(taskId)));
-      d.querySelector('[data-remove-session]')?.addEventListener('click', async () => {
+      d.querySelector('[data-remove]').addEventListener('click', async () => {
         d.close();
-        const cur = taskById(taskId);
-        await saveTask({
-          ...cur,
-          plan: cur.plan.filter((x) => x.date !== date).map((x) => (x.date >= today ? { ...x, pinned: true } : x)),
-        });
+        await removeBlock(taskId, date, '*');
+      });
+    },
+  );
+}
+
+/** Tap a work block in the day view: change its time or day, skip it, or open the task. */
+export function openBlockMenu(taskId, date, start) {
+  const t = taskById(taskId);
+  const b = (t?.plan || []).find((x) => x.date === date && x.start === start);
+  if (!b) return;
+  const from = atTime(date, start);
+  const to = new Date(+from + b.minutes * 60000);
+  const days = moveDays(t);
+  const isExam = t.type === 'exam';
+  open(
+    `<div class="sheet-form small">
+      <header class="sheet-head"><h2>${esc(workName(t))}</h2><button type="button" class="btn icon" data-close aria-label="Close">×</button></header>
+      <div class="sheet-body">
+        <p><strong>${esc(fmtRange(from, to))}</strong> on ${esc(fmtDate(parseYmd(date), { long: true }))} · ${esc(fmtMinutes(b.minutes))}${b.fixed ? ' · time set by you' : ''}</p>
+        <form class="time-move" data-time-move>
+          <label class="field inline"><span>Start at</span><input type="time" name="start" value="${esc(start)}" required></label>
+          <button class="btn btn-primary" type="submit">Move here</button>
+        </form>
+        <p class="hint">Or move it to another day, and the planner picks the time:</p>
+        <div class="day-pick">${days
+          .map((d) => `<button type="button" class="btn${d === date ? ' active' : ''}" data-move="${d}"${d === date ? ' disabled' : ''}>${esc(shortDay(d))}</button>`)
+          .join('')}</div>
+      </div>
+      <footer class="sheet-foot">
+        <button type="button" class="btn ghost danger" data-remove>${isExam ? 'Skip studying this day' : 'Remove this block'}</button>
+        ${b.fixed ? '<button type="button" class="btn ghost" data-unfix>Let the planner pick the time</button>' : ''}
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-open-task>Open task</button>
+      </footer>
+    </div>`,
+    (d) => {
+      d.querySelector('[data-time-move]').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const toStart = e.target.elements.start.value;
+        if (!toStart) return;
+        d.close();
+        await moveBlock(taskId, date, start, { toStart });
+      });
+      d.querySelectorAll('[data-move]').forEach((x) =>
+        x.addEventListener('click', async () => {
+          d.close();
+          await moveBlock(taskId, date, start, { toDate: x.dataset.move });
+        }),
+      );
+      d.querySelector('[data-unfix]')?.addEventListener('click', async () => {
+        d.close();
+        await unfixBlock(taskId, date, start);
+      });
+      d.querySelector('[data-open-task]').addEventListener('click', () => openTaskEditor(taskById(taskId)));
+      d.querySelector('[data-remove]').addEventListener('click', async () => {
+        d.close();
+        await removeBlock(taskId, date, start);
       });
     },
   );

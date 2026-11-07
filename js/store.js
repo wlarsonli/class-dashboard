@@ -12,6 +12,9 @@ export function defaultSettings() {
     workload: { hours: 4, deadlines: 3 },
     capacity: { weekday: 240, weekend: 300 },
     default_estimates: { assignment: 120, essay: 120, reading: 60, exam: 180, task: 30, admin: 15, event: 0 },
+    study_window: { start: '08:00', end: '23:00', weekend_start: '10:00' },
+    exam_prep: { final: { daily: 120, days: 7 }, midterm: { daily: 120, days: 5 }, quiz: { daily: 60, days: 3 } },
+    planner_version: 0,
     theme: 'auto',
     timezone: 'America/Chicago',
   };
@@ -27,6 +30,12 @@ export function mergeSettings(s = {}) {
     workload: { ...d.workload, ...(s.workload || {}) },
     capacity: { ...d.capacity, ...(s.capacity || {}) },
     default_estimates: { ...d.default_estimates, ...(s.default_estimates || {}) },
+    study_window: { ...d.study_window, ...(s.study_window || {}) },
+    exam_prep: {
+      final: { ...d.exam_prep.final, ...(s.exam_prep?.final || {}) },
+      midterm: { ...d.exam_prep.midterm, ...(s.exam_prep?.midterm || {}) },
+      quiz: { ...d.exam_prep.quiz, ...(s.exam_prep?.quiz || {}) },
+    },
   };
 }
 
@@ -43,7 +52,7 @@ export const COLS = {
   tasks: {
     id: null, course_id: null, title: '', type: 'task', due_at: null, duration_minutes: null, estimate_minutes: null,
     priority: 0, status: 'todo', done_at: null, notes: '', links: [], subtasks: [], plan: [], series_id: null,
-    repeat: null, source: 'manual', external_uid: null, estimated_date: false, location: '', hidden: false,
+    repeat: null, source: 'manual', external_uid: null, estimated_date: false, location: '', hidden: false, study: null,
   },
 };
 

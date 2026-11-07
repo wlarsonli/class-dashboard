@@ -6,12 +6,27 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 import { meetingsOn, type Course, type Meeting, type Settings } from '../_shared/schedule.ts';
 import { admin, caller, cors, json } from '../_shared/server.ts';
-import { DOW_LONG, dowOfYmd, fmtMinutes, fmtTime, minutesIn, toMinutes, TZ, ymdIn } from '../_shared/time.ts';
+import { DOW_LONG, dowOfYmd, fmtHM, fmtMinutes, fmtTime, minutesIn, toMinutes, TZ, ymdIn } from '../_shared/time.ts';
 
 interface Task {
   id: string; title: string; type: string; due_at: string | null; status: string; course_id: string | null;
-  plan: { date: string; minutes: number }[];
+  plan: { date: string; minutes: number; start?: string; unscheduled?: boolean }[];
 }
+
+/** Today's work blocks in time order, e.g. "3 pm Homework 6 (1.5 h)". */
+function blocksToday(tasks: Task[], today: string, afterMin = -1) {
+  return tasks
+    .filter((t) => t.status !== 'done')
+    .flatMap((t) =>
+      (t.plan || [])
+        .filter((s) => s.date === today)
+        .map((s) => ({ t, minutes: s.minutes, start: s.start && !s.unscheduled ? s.start : null })),
+    )
+    .filter((b) => afterMin < 0 || !b.start || toMinutes(b.start) >= afterMin)
+    .sort((a, b) => (a.start || '99').localeCompare(b.start || '99'));
+}
+const blockText = (b: ReturnType<typeof blocksToday>[number]) =>
+  `${b.start ? `${fmtHM(b.start)} ` : ''}${b.t.type === 'exam' ? `Study: ${b.t.title}` : b.t.title} (${fmtMinutes(b.minutes)})`;
 interface Payload { title: string; body: string; tag?: string; url?: string }
 
 webpush.setVapidDetails(
@@ -52,13 +67,13 @@ function rundown(today: string, tasks: Task[], meetings: Meeting[], courses: Cou
   const classes = meetingsOn(today, meetings, courses, settings, tz);
   const due = open.filter((t) => t.due_at && ymdIn(new Date(t.due_at), tz) === today);
   const overdue = open.filter((t) => t.due_at && new Date(t.due_at) < now && ymdIn(new Date(t.due_at), tz) !== today && t.type !== 'event');
-  const planned = open.flatMap((t) => (t.plan || []).filter((s) => s.date === today).map((s) => ({ t, minutes: s.minutes })));
+  const planned = blocksToday(open, today);
   const plannedMin = planned.reduce((a, p) => a + p.minutes, 0);
 
   const lines: string[] = [];
   if (classes.length) lines.push(`Classes: ${list(classes.map((c) => `${c.course.short} ${fmtTime(c.start, tz)}${c.note ? ` (${c.note})` : ''}`), 4)}`);
   if (due.length) lines.push(`Due: ${list(due.map((t) => `${name(t)} (${fmtTime(new Date(t.due_at!), tz)})`))}`);
-  if (planned.length) lines.push(`Plan: ${list(planned.map((p) => `${p.t.title} (${fmtMinutes(p.minutes)})`))}`);
+  if (planned.length) lines.push(`Plan: ${list(planned.map(blockText), 4)}`);
   if (overdue.length) lines.push(`Overdue: ${list(overdue.map(name), 2)}`);
   if (!lines.length) lines.push('Nothing due and nothing planned. Enjoy it.');
 
@@ -73,15 +88,14 @@ function rundown(today: string, tasks: Task[], meetings: Meeting[], courses: Cou
   };
 }
 
-function nudge(today: string, tasks: Task[]): Payload | null {
-  const planned = tasks
-    .filter((t) => t.status !== 'done')
-    .flatMap((t) => (t.plan || []).filter((s) => s.date === today).map((s) => ({ t, minutes: s.minutes })));
+function nudge(today: string, tasks: Task[], nowMin: number): Payload | null {
+  // What's still ahead today (blocks that haven't started yet).
+  const planned = blocksToday(tasks, today, nowMin);
   if (!planned.length) return null;
   const total = planned.reduce((a, p) => a + p.minutes, 0);
   return {
     title: `Still planned for today: ${fmtMinutes(total)}`,
-    body: list(planned.map((p) => `${p.t.title} (${fmtMinutes(p.minutes)})`), 4),
+    body: list(planned.map(blockText), 4),
     tag: `nudge-${today}`,
     url: './#today',
   };
@@ -117,7 +131,7 @@ async function runUser(db: SupabaseClient, userId: string) {
   }
   const nudgeAt = toMinutes(settings.nudge_time || '15:00');
   if (settings.alerts?.nudges !== false && nowMin >= nudgeAt && nowMin < nudgeAt + 240) {
-    const msg = nudge(today, tasks);
+    const msg = nudge(today, tasks, nowMin);
     if (msg && (await once(db, userId, 'nudge', today))) {
       await send(db, userId, msg);
       sent.push('nudge');

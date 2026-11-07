@@ -50,8 +50,26 @@ function planningCard() {
         <label class="field"><span>Warn me when a day has this many deadlines</span><input type="number" name="wl_deadlines" min="1" max="10" step="1" value="${esc(s.workload.deadlines)}"></label>
       </div>
       <p class="hint">The planner fills each day up to its study time, minus your Outlook events. You also get a heads-up whenever a day ends up with more work than that.</p>
+      <div class="grid3">
+        <label class="field"><span>Schedule work from (weekdays)</span><input type="time" name="win_start" value="${esc(s.study_window.start)}" required></label>
+        <label class="field"><span>From (weekends)</span><input type="time" name="win_weekend" value="${esc(s.study_window.weekend_start || s.study_window.start)}" required></label>
+        <label class="field"><span>Until</span><input type="time" name="win_end" value="${esc(s.study_window.end)}" required></label>
+      </div>
       <p class="hint">Default time needed for new tasks (hours). You can change it on any task.</p>
-      <div class="grid5">${est('assignment', 'Assignment')}${est('essay', 'Essay or paper')}${est('reading', 'Reading')}${est('exam', 'Exam prep')}${est('task', 'To-do')}</div>
+      <div class="grid5">${est('assignment', 'Assignment')}${est('essay', 'Essay or paper')}${est('reading', 'Reading')}${est('task', 'To-do')}</div>
+      <p class="hint">Exam studying: how much to study each day, and for how many days before the exam. You can change it on any exam.</p>
+      <div class="prep-rows">${[
+        ['final', 'Finals'],
+        ['midterm', 'Midterms'],
+        ['quiz', 'Quizzes and assessments'],
+      ]
+        .map(
+          ([k, label]) => `<div class="prep-row"><span>${label}</span>
+            <label class="field inline"><input type="number" name="prep_${k}_daily" min="0" max="12" step="0.25" value="${hrs(s.exam_prep[k].daily)}" aria-label="${label}: hours a day"><span>h a day for</span></label>
+            <label class="field inline"><input type="number" name="prep_${k}_days" min="1" max="21" step="1" value="${esc(s.exam_prep[k].days)}" aria-label="${label}: days"><span>days</span></label>
+          </div>`,
+        )
+        .join('')}</div>
       <div><button class="btn btn-primary" type="submit">Save planning settings</button></div>
     </form>`,
   );

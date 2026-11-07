@@ -6,8 +6,8 @@
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
--- Canvas and Outlook, every hour at :07
-select cron.schedule('class-dashboard-sync', '7 * * * *', $$
+-- Canvas and Outlook, every 15 minutes
+select cron.schedule('class-dashboard-sync', '7,22,37,52 * * * *', $$
   select net.http_post(
     url := 'https://PROJECT_REF.supabase.co/functions/v1/sync',
     headers := jsonb_build_object(
