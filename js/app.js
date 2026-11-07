@@ -1,10 +1,14 @@
 // Starts the app: sign-in, routing between screens, and all the click/submit handling.
-import { openBlockMenu, openCourseEditor, openSessionMenu, openTaskEditor } from './editor.js';
+import { describe, EXAMPLES, interpret } from './command.js';
+import { addDays, fmtRange, startOfDay, weekStart, ymd } from './dates.js';
+import { initDrag, isDragging } from './drag.js';
+import { openBlockMenu, openCourseEditor, openEventMenu, openSessionMenu, openTaskEditor } from './editor.js';
+import { hm } from './planner.js';
 import { enablePush, registerSW } from './push.js';
-import { describeQuickAdd, parseQuickAdd } from './quickadd.js';
+import { parseQuickAdd } from './quickadd.js';
 import {
-  courseById, exportData, importData, moveSession, onRender, quickAdd, refresh, replan, rerender, saveIntegrations, saveSettings,
-  state, store, syncIfStale, taskById, toggleDone,
+  applyCommand, clearAsk, courseById, dragBlock, dragSession, exportData, importData, moveEventDay, moveTaskEvent, onRender, quickAdd, refresh,
+  replan, rerender, resizeBlock, saveIntegrations, saveSettings, state, store, syncIfStale, taskById, toggleDone,
 } from './state.js';
 import { $, $$, esc, toast } from './util.js';
 import { renderClasses } from './views/classes.js';
@@ -19,7 +23,7 @@ const TITLES = { today: 'Today', day: 'Day plan', week: 'Week plan', classes: 'C
 const NAV_OF = { day: 'plan', week: 'plan' };
 const main = document.getElementById('view');
 const modal = document.getElementById('modal');
-let quickDraft = '';
+const drafts = { 'quick-input': '', 'ask-input': '' };
 let pendingRender = false;
 
 const viewFromHash = () => {
@@ -37,28 +41,68 @@ function applyTheme() {
 // While you're typing in a settings field, background refreshes wait instead of redrawing the page.
 function isEditing() {
   const a = document.activeElement;
-  return !!(a && main.contains(a) && a.matches('input, textarea, select') && !['quick-input', 'task-search'].includes(a.id));
+  return !!(a && main.contains(a) && a.matches('input, textarea, select') && !['quick-input', 'ask-input', 'task-search'].includes(a.id));
 }
 
-function updateQuickPreview(input) {
-  const out = $('#quick-preview');
+/** The day a typed change is about when it doesn't name one: the day (or week) you're looking at. */
+function viewedDate() {
+  const today = startOfDay(new Date());
+  if (state.view === 'day') return ymd(addDays(today, state.dayOffset));
+  if (state.view === 'week' && state.weekOffset > 0) return ymd(addDays(weekStart(today), state.weekOffset * 7));
+  return ymd(today);
+}
+
+/** Live preview under the box: what pressing Enter will do. */
+function updatePreview(input) {
+  const out = document.getElementById(`${input.id === 'quick-input' ? 'quick' : 'ask'}-preview`);
   if (!out) return;
   const text = input.value.trim();
   if (!text) {
     out.innerHTML = '';
     return;
   }
-  const p = parseQuickAdd(text, state.courses);
-  out.innerHTML = `<span class="qp-title">${esc(p.title || 'New task')}</span>${describeQuickAdd(p)
-    .map((b) => `<span class="qp-bit">${esc(b)}</span>`)
-    .join('')}`;
+  const cmd = interpret(text, { state, date: viewedDate() });
+  if (cmd?.kind === 'error') {
+    out.innerHTML = `<span class="qp-note">${esc(cmd.message)}</span>`;
+    return;
+  }
+  if (cmd?.kind === 'task' && input.id === 'ask-input' && !parseQuickAdd(text, state.courses).due_at) {
+    out.innerHTML = '<span class="qp-note">Add a time, like “basketball 5-7pm”, or a day for a new task.</span>';
+    return;
+  }
+  const [head, ...bits] = describe(cmd, text, state);
+  out.innerHTML = `<span class="qp-title${cmd?.kind === 'task' ? '' : ' plan'}">${esc(head || '')}</span>${bits.map((b) => `<span class="qp-bit">${esc(b)}</span>`).join('')}`;
+}
+
+/** Enter in either box: a plan change goes to the planner, anything else becomes a task. */
+async function submitText(text, { box }) {
+  const cmd = interpret(text, { state, date: viewedDate() });
+  if (!cmd) return;
+  if (cmd.kind === 'error') {
+    state.ask = { ok: false, text, title: cmd.message, examples: /couldn't|Which|What time/.test(cmd.message) ? EXAMPLES.slice(0, 6) : null };
+    rerender();
+    return false;
+  }
+  if (cmd.kind === 'task') {
+    if (box === 'ask' && !parseQuickAdd(text, state.courses).due_at) {
+      state.ask = { ok: false, text, title: "I couldn't tell what to change.", examples: EXAMPLES };
+      rerender();
+      return false;
+    }
+    state.ask = null;
+    const t = await quickAdd(text);
+    if (t) toast(`Added: ${t.title}`, { action: 'Edit', onAction: () => openTaskEditor(taskById(t.id)) });
+    return true;
+  }
+  await applyCommand(cmd, text);
+  return true;
 }
 
 function render() {
   applyTheme();
   if (!state.ready) return;
-  if (state.background && isEditing()) {
-    pendingRender = true;
+  if ((state.background && isEditing()) || isDragging()) {
+    pendingRender = true; // wait until you're done typing or dragging
     return;
   }
   const view = viewFromHash();
@@ -84,10 +128,12 @@ function render() {
   banner.hidden = !state.offline;
   banner.textContent = state.offline ? "You're offline. This is your last saved copy, and changes won't save until you reconnect." : '';
 
-  const qi = $('#quick-input');
-  if (qi && quickDraft) {
-    qi.value = quickDraft;
-    updateQuickPreview(qi);
+  for (const [id, text] of Object.entries(drafts)) {
+    const el = document.getElementById(id);
+    if (el && text) {
+      el.value = text;
+      updatePreview(el);
+    }
   }
   if (focusId) {
     const el = document.getElementById(focusId);
@@ -170,6 +216,18 @@ const ACTIONS = {
   'new-task': (el) => openTaskEditor(null, { course: el.dataset.course || null }),
   session: (el) => openSessionMenu(el.dataset.id, el.dataset.date),
   block: (el) => openBlockMenu(el.dataset.id, el.dataset.date, el.dataset.start),
+  event: (el) => openEventMenu(el.dataset.ev, el.dataset.date),
+  'ask-undo': () => applyCommand({ kind: 'undo' }),
+  'ask-dismiss': () => clearAsk(),
+  'ask-example': (el) => {
+    const input = $('#ask-input') || $('#quick-input');
+    if (!input) return;
+    input.value = el.dataset.text;
+    drafts[input.id] = input.value;
+    updatePreview(input);
+    input.focus();
+  },
+  'clear-limit': (el) => applyCommand({ kind: 'limit', dates: [el.dataset.date], minutes: null, chips: ['Plan work as usual', 'this day'] }),
   'day-prev': () => {
     state.dayOffset -= 1;
     rerender();
@@ -255,10 +313,16 @@ const FORMS = {
   async quick(fd) {
     const text = String(fd.get('text') || '').trim();
     if (!text) return;
-    quickDraft = '';
-    const t = await quickAdd(text);
-    if (t) toast(`Added: ${t.title}`, { action: 'Edit', onAction: () => openTaskEditor(taskById(t.id)) });
-    $('#quick-input')?.focus();
+    drafts['quick-input'] = '';
+    if ((await submitText(text, { box: 'quick' })) === false) drafts['quick-input'] = text;
+    rerender();
+  },
+  async ask(fd) {
+    const text = String(fd.get('text') || '').trim();
+    if (!text) return;
+    drafts['ask-input'] = '';
+    if ((await submitText(text, { box: 'ask' })) === false) drafts['ask-input'] = text;
+    rerender();
   },
   async alerts(fd) {
     await saveSettings({
@@ -339,9 +403,9 @@ document.addEventListener('submit', async (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.id === 'quick-input') {
-    quickDraft = t.value;
-    updateQuickPreview(t);
+  if (t.id === 'quick-input' || t.id === 'ask-input') {
+    drafts[t.id] = t.value;
+    updatePreview(t);
   } else if (t.dataset?.filter === 'q') {
     state.filter.q = t.value;
     rerender();
@@ -362,37 +426,42 @@ document.addEventListener('change', async (e) => {
   }
 });
 
-// Drag a work session to another day (desktop). On phones, tapping it opens a menu instead.
-document.addEventListener('dragstart', (e) => {
-  const el = e.target.closest?.('[data-drag]');
-  if (!el) return;
-  e.dataTransfer.setData('text/plain', JSON.stringify({ id: el.dataset.id, date: el.dataset.date }));
-  e.dataTransfer.effectAllowed = 'move';
-  el.classList.add('dragging');
-});
-document.addEventListener('dragend', (e) => e.target.closest?.('[data-drag]')?.classList.remove('dragging'));
-document.addEventListener('dragover', (e) => {
-  const zone = e.target.closest?.('[data-drop]');
-  if (!zone) return;
-  e.preventDefault();
-  $$('.drop-hover').forEach((z) => z !== zone && z.classList.remove('drop-hover'));
-  zone.classList.add('drop-hover');
-});
-document.addEventListener('dragleave', (e) => {
-  const zone = e.target.closest?.('[data-drop]');
-  if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove('drop-hover');
-});
-document.addEventListener('drop', async (e) => {
-  const zone = e.target.closest?.('[data-drop]');
-  if (!zone) return;
-  e.preventDefault();
-  zone.classList.remove('drop-hover');
-  try {
-    const d = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
-    if (d.id) await moveSession(d.id, d.date, zone.dataset.drop);
-  } catch {
-    /* not one of ours */
-  }
+// Drag and drop on the Plan tab (see drag.js).
+const LOCKED = {
+  outlook: 'This comes from Outlook. Move it there, and your plan catches up within 15 minutes.',
+  class: 'Classes come from your schedule. If one is cancelled, tell the planner, like “no math class tuesday”.',
+  exam: "Exam times come from your class. Tap the exam if its date changed.",
+};
+initDrag({
+  label: (date, s, e) => fmtRange(new Date(`${date}T${hm(s)}`), new Date(`${date}T${hm(Math.min(e, 1439))}`)),
+  locked: (kind) => toast(LOCKED[kind] || "This one can't be moved here."),
+  async day({ kind, el, date, to, resized }) {
+    try {
+      if (kind === 'block') {
+        if (resized) await resizeBlock(el.dataset.id, date, el.dataset.start, to[1] - to[0]);
+        else await dragBlock(el.dataset.id, date, el.dataset.start, hm(to[0]));
+      } else if (kind === 'mine') await moveEventDay(el.dataset.ev, date, { start: hm(to[0]), end: hm(Math.min(to[1], 1439)) });
+      else if (kind === 'tevent') await moveTaskEvent(el.dataset.id, date, hm(to[0]), to[1] - to[0]);
+    } catch (err) {
+      console.error(err);
+      toast(err.message || String(err));
+    }
+    rerender(); // in case nothing changed, put the block back where it was
+  },
+  async week({ id, from, to }) {
+    try {
+      await dragSession(id, from, to);
+    } catch (err) {
+      console.error(err);
+      toast(err.message || String(err));
+    }
+  },
+  done: () => {
+    if (pendingRender) {
+      pendingRender = false;
+      render();
+    }
+  },
 });
 
 document.addEventListener('keydown', (e) => {

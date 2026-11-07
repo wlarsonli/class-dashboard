@@ -91,4 +91,32 @@ export function section(title, inner, { count = null, cls = '', action = '', id 
 
 export const empty = (msg) => `<p class="empty">${esc(msg)}</p>`;
 
+/** The box on the Plan tab where you type changes like "clear 5-7pm for basketball". */
+export function askBox(placeholder = 'Tell the planner: “basketball 5-7pm”') {
+  return `<form class="quick card ask" data-form="ask" autocomplete="off">
+    <label class="sr-only" for="ask-input">Tell the planner what to change</label>
+    <input id="ask-input" name="text" type="text" placeholder="${esc(placeholder)}" enterkeyhint="go" autocapitalize="off" spellcheck="false">
+    <button class="btn btn-primary" type="submit">Go</button>
+    <div class="quick-preview" id="ask-preview" aria-live="polite"></div>
+  </form>`;
+}
+
+/** What the last typed change did, with Undo. */
+export function askResult() {
+  const a = state.ask;
+  if (!a) return '';
+  const moved = a.moved || [];
+  return `<section class="card ask-result${a.ok ? '' : ' tone-warn'}" role="status">
+    <div class="ask-head">
+      <span class="ask-icon${a.ok ? '' : ' warn'}">${a.ok ? ICON.check : ICON.warn}</span>
+      <p class="ask-title">${esc(a.title)}</p>
+      ${a.snap ? '<button class="btn small" type="button" data-action="ask-undo">Undo</button>' : ''}
+      <button class="btn icon small ghost" type="button" data-action="ask-dismiss" aria-label="Dismiss">×</button>
+    </div>
+    ${(a.lines || []).map((l) => `<p class="ask-line">${esc(l)}</p>`).join('')}
+    ${moved.length ? `<ul class="ask-moved">${moved.slice(0, 5).map((m) => `<li>${esc(m)}</li>`).join('')}${moved.length > 5 ? `<li>and ${moved.length - 5} more</li>` : ''}</ul>` : ''}
+    ${a.examples ? `<p class="ask-line">Things you can say:</p><div class="ask-examples">${a.examples.map((x) => `<button type="button" class="qp-bit" data-action="ask-example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
+  </section>`;
+}
+
 export const byDue = (a, b) => (a.due_at || '9999') < (b.due_at || '9999') ? -1 : (a.due_at || '9999') > (b.due_at || '9999') ? 1 : (b.priority || 0) - (a.priority || 0);

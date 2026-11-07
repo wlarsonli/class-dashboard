@@ -1,13 +1,14 @@
-// Day view: a timeline of one day with classes, Outlook events, exams, deadlines, and the
-// work blocks the planner scheduled. Tap a work block to move it.
-import { byDue, ICON } from '../components.js';
+// Day view: a timeline of one day with classes, your events, Outlook events, exams, deadlines,
+// and the work blocks the planner scheduled. Drag a block (or your event) to move it, drag its
+// bottom edge to change how long it is, or tap it for more options.
+import { askBox, askResult, byDue, ICON } from '../components.js';
 import { addDays, DOW_LONG, fmtMinutes, fmtRange, fmtTime, MON_LONG, parseYmd, relDay, startOfDay, toMinutes, ymd } from '../dates.js';
-import { DEFAULT_WINDOW, freeGaps, outlookStudy } from '../planner.js';
+import { DEFAULT_WINDOW, dayLimit, freeGaps, outlookStudy } from '../planner.js';
 import { courseById, liveTasks, state } from '../state.js';
-import { breakOn, busyOn, meetingsOn } from '../term.js';
+import { breakOn, busyOn, eventsOn, meetingsOn } from '../term.js';
 import { esc } from '../util.js';
 
-const PX = 1.1; // pixels per minute
+export const PX = 1.1; // pixels per minute
 const minsOf = (d) => d.getHours() * 60 + d.getMinutes();
 const at = (dateStr, m) => {
   const d = parseYmd(dateStr);
@@ -54,6 +55,9 @@ export function dayItems(d, now = new Date()) {
   for (const m of meetingsOn(d, state)) {
     items.push({ kind: 'class', s: minsOf(m.start), e: minsOf(m.end), title: `${m.course.short} ${m.meeting.kind}`, sub: [m.location, m.note].filter(Boolean).join(' · '), color: m.course.color });
   }
+  for (const o of eventsOn(d, state)) {
+    items.push({ kind: 'mine', s: o.s, e: o.e, title: o.title, sub: o.weekly ? 'every week' : 'your event', ev: o.ev.id, date: d });
+  }
   const attributed = new Map();
   for (const [taskId, list] of outlookStudy(state, now)) for (const v of list) attributed.set(v.uid, taskId);
   const d0 = parseYmd(d);
@@ -82,7 +86,10 @@ export function dayItems(d, now = new Date()) {
     const due = new Date(t.due_at);
     const c = courseById(t.course_id);
     if (t.type === 'exam' || t.type === 'event') {
-      items.push({ kind: 'exam', s: minsOf(due), e: minsOf(due) + (t.duration_minutes || 60), title: `${c ? `${c.short} · ` : ''}${t.title}`, sub: t.location, color: c?.color, id: t.id });
+      items.push({
+        kind: t.type === 'exam' ? 'exam' : 'tevent', s: minsOf(due), e: minsOf(due) + (t.duration_minutes || 60),
+        title: `${c ? `${c.short} · ` : ''}${t.title}`, sub: t.location, color: c?.color, id: t.id, date: d,
+      });
     }
   }
   const unscheduled = [];
@@ -102,6 +109,7 @@ export function dayItems(d, now = new Date()) {
         e: st + s.minutes,
         title: t.type === 'exam' ? `Study: ${t.title}` : t.title,
         sub: `${c ? `${c.short} · ` : ''}${fmtMinutes(s.minutes)}${s.fixed ? ' · set by you' : ''}`,
+        minutes: s.minutes,
         color: c?.color,
         id: t.id,
         date: d,
@@ -145,11 +153,19 @@ export function renderDay() {
       const time = esc(fmtRange(at(d, i.s), at(d, i.e)));
       const inner = `<span class="tl-title">${esc(i.title)}</span><span class="tl-time">${time}${i.sub ? ` · ${esc(i.sub)}` : ''}</span>`;
       const short = h < 44 ? ' short' : '';
+      const grip = '<span class="tl-grip" data-grip aria-hidden="true"></span>';
+      const pos = `data-s="${i.s}" data-e="${i.e}"`;
       if (i.kind.startsWith('work')) {
-        return `<button type="button" class="tl-item ${i.kind}${short}" style="${style}" data-action="block" data-id="${i.id}" data-date="${i.date}" data-start="${i.start}">${inner}</button>`;
+        return `<button type="button" class="tl-item ${i.kind}${short}" style="${style}" data-action="block" data-drag="block" ${pos} data-id="${i.id}" data-date="${i.date}" data-start="${i.start}" aria-label="${esc(`${i.title}, ${fmtRange(at(d, i.s), at(d, i.e))}`)}">${inner}${grip}</button>`;
       }
-      if (i.kind === 'exam') return `<button type="button" class="tl-item exam${short}" style="${style}" data-action="open" data-id="${i.id}">${inner}</button>`;
-      return `<div class="tl-item ${i.kind}${short}" style="${style}">${inner}</div>`;
+      if (i.kind === 'mine') {
+        return `<button type="button" class="tl-item mine${short}" style="${style}" data-action="event" data-drag="mine" ${pos} data-ev="${i.ev}" data-date="${d}">${inner}${grip}</button>`;
+      }
+      if (i.kind === 'tevent') {
+        return `<button type="button" class="tl-item tevent${short}" style="${style}" data-action="open" data-drag="tevent" ${pos} data-id="${i.id}" data-date="${d}">${inner}${grip}</button>`;
+      }
+      if (i.kind === 'exam') return `<button type="button" class="tl-item exam${short}" style="${style}" data-action="open" data-id="${i.id}" data-locked="exam">${inner}</button>`;
+      return `<div class="tl-item ${i.kind}${short}" style="${style}" data-locked="${i.kind === 'class' ? 'class' : 'outlook'}">${inner}</div>`;
     })
     .join('');
 
@@ -164,6 +180,14 @@ export function renderDay() {
 
   const label = isToday ? 'Today' : relDay(date, now);
   const brk = breakOn(d, state.settings);
+  const limit = dayLimit(state, d);
+  const limitCard =
+    limit === null
+      ? ''
+      : `<section class="card day-limit${limit === 0 ? ' off' : ''}">
+          <p><strong>${limit === 0 ? 'Day off.' : `Light day: at most ${esc(fmtMinutes(limit))} of work.`}</strong> ${limit === 0 ? 'Nothing gets planned on this day.' : 'The rest goes to other days.'}</p>
+          <button class="btn small" type="button" data-action="clear-limit" data-date="${d}">Plan as usual</button>
+        </section>`;
   const summary = [
     planned ? `${fmtMinutes(planned)} of work planned` : 'No work planned',
     deadlines.length ? `${deadlines.length} due` : '',
@@ -182,7 +206,10 @@ export function renderDay() {
       <button class="btn btn-primary" type="button" data-action="replan" title="Re-plan everything you haven't placed yourself">Re-plan</button>
     </div>
   </div>
-  <p class="hint">${esc(summary)}. Work is fitted around your classes and Outlook events. Tap a block to move it.</p>
+  ${askBox()}
+  ${askResult()}
+  ${limitCard}
+  <p class="hint">${esc(summary)}. Drag a block to move it, or its bottom edge to change how long it is. On your phone, press and hold first. Tap a block for more options.</p>
   ${
     unscheduled.length
       ? `<section class="card tone-warn day-unplaced"><header class="card-head"><h2>Doesn't fit in this day's free time</h2></header>
@@ -197,6 +224,6 @@ export function renderDay() {
   ${allDay.length ? `<div class="allday">${allDay.map((b) => `<span class="tag">${esc(b.title)}</span>`).join('')}</div>` : ''}
   <section class="card timeline" style="--h:${(hi - lo) * PX}px;--hour:${60 * PX}px" aria-label="Schedule for ${esc(DOW_LONG[date.getDay()])}">
     <div class="tl-hours">${hours.join('')}</div>
-    <div class="tl-lanes">${blocks}${dueMarks}${nowLine}</div>
+    <div class="tl-lanes" data-lo="${lo}" data-hi="${hi}" data-px="${PX}" data-date="${d}">${blocks}${dueMarks}${nowLine}</div>
   </section>`;
 }

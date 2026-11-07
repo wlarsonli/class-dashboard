@@ -1,5 +1,5 @@
 // Term progress, class meetings on a given day, and busy time from Outlook.
-import { addDays, atTime, dayDiff, parseYmd, startOfDay, weekStart, ymd } from './dates.js';
+import { addDays, atTime, dayDiff, parseYmd, startOfDay, toMinutes, weekStart, ymd } from './dates.js';
 
 export function breakOn(dateStr, settings) {
   for (const b of settings?.term?.breaks || []) {
@@ -94,6 +94,29 @@ export function meetingsOn(dateStr, state) {
     });
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Your own events on a date (weekly ones included), with one-day changes applied.
+ * Each: { ev, date, start, end ('HH:MM'), s, e (minutes after midnight), title, weekly }
+ */
+export function eventsOn(dateStr, state) {
+  const dow = parseYmd(dateStr).getDay();
+  const out = [];
+  for (const ev of state.events || []) {
+    const weekly = (ev.days || []).length > 0;
+    if (weekly) {
+      if (dateStr < ev.date || (ev.until && dateStr > ev.until) || !ev.days.includes(dow) || (ev.skip || []).includes(dateStr)) continue;
+    } else if (ev.date !== dateStr) continue;
+    const change = ev.moved?.[dateStr];
+    const start = change?.start || ev.start_time;
+    const end = change?.end || ev.end_time;
+    const s = toMinutes(start);
+    let e = toMinutes(end);
+    if (e <= s) e = 1440;
+    out.push({ ev, date: dateStr, start, end, s, e, title: ev.title || 'Busy', weekly });
+  }
+  return out.sort((a, b) => a.s - b.s);
 }
 
 /** Outlook events overlapping a date. */

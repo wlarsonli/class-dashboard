@@ -1,4 +1,4 @@
-import { byDue, chip, empty, ICON, section, taskRow } from '../components.js';
+import { askResult, byDue, chip, empty, ICON, section, taskRow } from '../components.js';
 import { addDays, countdown, DOW_LONG, fmtDate, fmtMinutes, fmtRange, MON_LONG, parseYmd, relDay, startOfDay, ymd } from '../dates.js';
 import { estimateOf, workloadWarnings } from '../planner.js';
 import { courseById, openTasks, state } from '../state.js';
@@ -47,8 +47,8 @@ export function renderToday() {
   </div>`;
 
   const quick = `<form class="quick card o-0" data-form="quick" autocomplete="off">
-    <label class="sr-only" for="quick-input">Add a task</label>
-    <input id="quick-input" name="text" type="text" placeholder="Add a task, like “cs hw7 fri 6pm ~3h”" enterkeyhint="done">
+    <label class="sr-only" for="quick-input">Add a task or change your plan</label>
+    <input id="quick-input" name="text" type="text" placeholder="Add a task (“cs hw7 fri 6pm”) or change your plan (“basketball 5-7pm”)" enterkeyhint="done">
     <button class="btn btn-primary" type="submit">Add</button>
     <div class="quick-preview" id="quick-preview" aria-live="polite"></div>
   </form>`;
@@ -99,9 +99,16 @@ export function renderToday() {
       if (i.kind === 'class') html = `<span class="ev-title">${esc(i.title)}</span>`;
       else if (i.kind.startsWith('work')) html = `${chip(c, { small: true })}<span class="ev-title">${esc(i.title)}</span><span class="tag">work</span>`;
       else if (i.kind === 'exam') html = `<span class="ev-title">${esc(i.title)}</span><span class="tag exam-tag">exam</span>`;
+      else if (i.kind === 'mine' || i.kind === 'tevent') html = `<span class="ev-dot mine"></span><span class="ev-title">${esc(i.title)}</span>`;
       else html = `<span class="ev-dot${i.kind.includes('study') ? ' study' : ''}"></span><span class="ev-title">${esc(i.title)}</span>`;
       const where = i.kind === 'class' || i.kind === 'exam' ? i.sub : i.kind.includes('study') ? i.sub : '';
-      const action = i.kind.startsWith('work') ? ` data-action="block" data-id="${i.id}" data-date="${i.date}" data-start="${i.start}"` : '';
+      const action = i.kind.startsWith('work')
+        ? ` data-action="block" data-id="${i.id}" data-date="${i.date}" data-start="${i.start}"`
+        : i.kind === 'mine'
+          ? ` data-action="event" data-ev="${i.ev}" data-date="${i.date}"`
+          : i.kind === 'tevent' || i.kind === 'exam'
+            ? ` data-action="open" data-id="${i.id}"`
+            : '';
       return { start: at(i.s), end: at(i.e), html, where, action, cls: i.kind.split(' ')[0], color: i.color };
     });
   const schedule = items.length
@@ -151,7 +158,7 @@ export function renderToday() {
 
   return `${head}
   <div class="today-grid">
-    <div class="col">${quick}${headsUp}${overdueCard}${todayCard}${plannedCard}${weekCard}${doneCard}${noDateCard}</div>
+    <div class="col">${quick}${state.ask ? `<div class="o-0">${askResult()}</div>` : ''}${headsUp}${overdueCard}${todayCard}${plannedCard}${weekCard}${doneCard}${noDateCard}</div>
     <div class="col">${scheduleCard}${comingCard}${termCard}</div>
   </div>`;
 }

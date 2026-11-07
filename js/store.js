@@ -14,6 +14,7 @@ export function defaultSettings() {
     default_estimates: { assignment: 120, essay: 120, reading: 60, exam: 180, task: 30, admin: 15, event: 0 },
     study_window: { start: '08:00', end: '23:00', weekend_start: '10:00' },
     exam_prep: { final: { daily: 120, days: 7 }, midterm: { daily: 120, days: 5 }, quiz: { daily: 60, days: 3 } },
+    day_limits: {}, // { 'YYYY-MM-DD': most minutes of work that day } (0 = day off)
     planner_version: 0,
     theme: 'auto',
     timezone: 'America/Chicago',
@@ -36,6 +37,7 @@ export function mergeSettings(s = {}) {
       midterm: { ...d.exam_prep.midterm, ...(s.exam_prep?.midterm || {}) },
       quiz: { ...d.exam_prep.quiz, ...(s.exam_prep?.quiz || {}) },
     },
+    day_limits: { ...(s.day_limits || {}) },
   };
 }
 
@@ -53,6 +55,10 @@ export const COLS = {
     id: null, course_id: null, title: '', type: 'task', due_at: null, duration_minutes: null, estimate_minutes: null,
     priority: 0, status: 'todo', done_at: null, notes: '', links: [], subtasks: [], plan: [], series_id: null,
     repeat: null, source: 'manual', external_uid: null, estimated_date: false, location: '', hidden: false, study: null,
+  },
+  // Events you add in the app. Weekly ones repeat on `days` from `date` through `until`.
+  events: {
+    id: null, title: '', date: null, start_time: '17:00', end_time: '18:00', days: [], until: null, skip: [], moved: {},
   },
 };
 
@@ -86,7 +92,7 @@ class LocalStore {
     } catch {
       /* fall through */
     }
-    return { courses: [], meetings: [], tasks: [], busy: [], settings: {}, integrations: {} };
+    return { courses: [], meetings: [], tasks: [], busy: [], events: [], settings: {}, integrations: {} };
   }
 
   write(d) {
@@ -106,6 +112,7 @@ class LocalStore {
       meetings: d.meetings || [],
       tasks: (d.tasks || []).filter((t) => !t.hidden),
       busy: d.busy || [],
+      events: d.events || [],
       settings: mergeSettings(d.settings),
       integrations: d.integrations || {},
     };
@@ -121,6 +128,19 @@ class LocalStore {
   async deleteTasks(ids) {
     this.mutate((d) => {
       d.tasks = (d.tasks || []).filter((t) => !ids.includes(t.id));
+    });
+  }
+
+  async saveEvents(rows) {
+    this.mutate((d) => {
+      d.events ||= [];
+      rows.forEach((r) => upsertInto(d.events, row('events', r)));
+    });
+  }
+
+  async deleteEvents(ids) {
+    this.mutate((d) => {
+      d.events = (d.events || []).filter((e) => !ids.includes(e.id));
     });
   }
 
@@ -172,6 +192,7 @@ class LocalStore {
       meetings: data.meetings.map((m) => row('meetings', m)),
       tasks: data.tasks.map((t) => row('tasks', t)),
       busy: data.busy || [],
+      events: (data.events || []).map((e) => row('events', e)),
       settings: data.settings,
       integrations: data.integrations || {},
     });
@@ -243,15 +264,20 @@ class SupabaseStore {
   async load() {
     const since = new Date(Date.now() - 2 * 86400000).toISOString();
     const db = this.sb;
-    const [courses, meetings, tasks, busy, settings, integrations] = await Promise.all([
+    const [courses, meetings, tasks, busy, events, settings, integrations] = await Promise.all([
       db.from('courses').select('*').order('sort_order').then((r) => this.ok(r)),
       db.from('meetings').select('*').then((r) => this.ok(r)),
       db.from('tasks').select('*').eq('hidden', false).then((r) => this.ok(r)),
       db.from('busy_blocks').select('*').gte('ends_at', since).order('starts_at').then((r) => this.ok(r)),
+      // Your own events. If the table isn't there yet, the rest of the app still loads.
+      db.from('events').select('*').then((r) => {
+        if (r.error) console.warn("Couldn't load your events", r.error);
+        return r.data || [];
+      }),
       db.from('settings').select('data').maybeSingle().then((r) => this.ok(r)),
       db.from('integrations').select('*').maybeSingle().then((r) => this.ok(r)),
     ]);
-    return { courses, meetings, tasks, busy, settings: mergeSettings(settings?.data || {}), integrations: integrations || {} };
+    return { courses, meetings, tasks, busy, events, settings: mergeSettings(settings?.data || {}), integrations: integrations || {} };
   }
 
   async upsert(table, rows) {
@@ -268,6 +294,14 @@ class SupabaseStore {
 
   async deleteTasks(ids) {
     if (ids.length) this.ok(await this.sb.from('tasks').delete().in('id', ids));
+  }
+
+  saveEvents(rows) {
+    return this.upsert('events', rows);
+  }
+
+  async deleteEvents(ids) {
+    if (ids.length) this.ok(await this.sb.from('events').delete().in('id', ids));
   }
 
   saveCourses(rows) {
@@ -301,9 +335,11 @@ class SupabaseStore {
     this.ok(await this.sb.from('tasks').delete().neq('id', none));
     this.ok(await this.sb.from('meetings').delete().neq('id', none));
     this.ok(await this.sb.from('courses').delete().neq('id', none));
+    this.ok(await this.sb.from('events').delete().neq('id', none));
     await this.saveCourses(data.courses);
     await this.saveMeetings(data.meetings);
     await this.saveTasks(data.tasks);
+    await this.saveEvents(data.events || []);
     await this.saveSettings(data.settings);
     if (data.integrations) await this.saveIntegrations(data.integrations);
   }

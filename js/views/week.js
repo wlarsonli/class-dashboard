@@ -1,8 +1,8 @@
-import { byDue, chip, ICON } from '../components.js';
+import { askBox, askResult, byDue, chip, ICON } from '../components.js';
 import { addDays, atTime, dayDiff, DOW, fmtDate, fmtMinutes, fmtTime, MON, parseYmd, startOfDay, weekStart, ymd } from '../dates.js';
-import { isStudyBlock, loadByDay, makeCapacity, workloadWarnings } from '../planner.js';
+import { dayLimit, isStudyBlock, loadByDay, makeCapacity, workloadWarnings } from '../planner.js';
 import { courseById, liveTasks, state } from '../state.js';
-import { breakOn, busyOn, meetingsOn } from '../term.js';
+import { breakOn, busyOn, eventsOn, meetingsOn } from '../term.js';
 import { esc } from '../util.js';
 
 const color = (t) => esc(courseById(t.course_id)?.color || 'var(--accent)');
@@ -36,7 +36,9 @@ export function renderWeek() {
       <button class="btn btn-primary" type="button" data-action="replan" title="Re-plan everything you haven't placed yourself">Re-plan</button>
     </div>
   </div>
-  <p class="hint">${esc(fmtMinutes(weekPlanned))} of work planned this week. Tap a day to see its full schedule. Drag a work session to another day, or tap it, to move it.</p>`;
+  ${askBox()}
+  ${askResult()}
+  <p class="hint">${esc(fmtMinutes(weekPlanned))} of work planned this week. Tap a day to see its full schedule. Drag a work session to another day (on your phone, press and hold first), or tap it for options.</p>`;
 
   const cols = days
     .map((d) => {
@@ -45,6 +47,8 @@ export function renderWeek() {
       const brk = breakOn(d, state.settings);
       const classes = meetingsOn(d, state);
       const events = busyOn(d, state).filter((b) => !b.all_day && !isStudyBlock(b));
+      const mine = eventsOn(d, state);
+      const limit = dayLimit(state, d);
       const due = tasks.filter((t) => t.due_at && ymd(new Date(t.due_at)) === d).sort(byDue);
       // One chip per task per day, showing when its first block starts.
       const byTask = new Map();
@@ -65,12 +69,24 @@ export function renderWeek() {
       const cap = capacity(d);
       const pct = cap ? Math.min(100, (planned / cap) * 100) : planned ? 100 : 0;
       const w = warns.get(d);
+      // Classes, your events, and Outlook events, in time order.
+      const minsOf = (x) => x.getHours() * 60 + x.getMinutes();
       const sched = [
-        ...classes.map(
-          (m) => `<li title="${esc(`${m.meeting.kind}, ${m.location}`)}"><span>${esc(fmtTime(m.start))}</span>${chip(m.course, { small: true })}${m.note ? `<em>${esc(m.note)}</em>` : ''}</li>`,
-        ),
-        ...events.map((b) => `<li title="${esc(b.location || '')}"><span>${esc(fmtTime(new Date(b.starts_at)))}</span><em>${esc(b.title)}</em></li>`),
-      ];
+        ...classes.map((m) => ({
+          at: minsOf(m.start),
+          html: `<li title="${esc(`${m.meeting.kind}, ${m.location}`)}"><span>${esc(fmtTime(m.start))}</span>${chip(m.course, { small: true })}${m.note ? `<em>${esc(m.note)}</em>` : ''}</li>`,
+        })),
+        ...mine.map((o) => ({
+          at: o.s,
+          html: `<li class="mine"><span>${esc(fmtTime(atTime(d, o.start)))}</span><button type="button" class="mine-link" data-action="event" data-ev="${o.ev.id}" data-date="${d}">${esc(o.title)}</button></li>`,
+        })),
+        ...events.map((b) => ({
+          at: minsOf(new Date(b.starts_at)),
+          html: `<li title="${esc(b.location || '')}"><span>${esc(fmtTime(new Date(b.starts_at)))}</span><em>${esc(b.title)}</em></li>`,
+        })),
+      ]
+        .sort((x, y) => x.at - y.at)
+        .map((x) => x.html);
       const offset = dayDiff(startOfDay(now), date);
       return `<section class="day card${isToday ? ' is-today' : ''}${d < todayStr ? ' is-past' : ''}" data-drop="${d}" aria-label="${esc(fmtDate(date, { long: true }))}">
         <header class="day-head">
@@ -80,6 +96,7 @@ export function renderWeek() {
           ${w ? `<span class="warn-badge" title="${esc(w.reasons.join(', '))}">${ICON.warn}</span>` : ''}
         </header>
         ${brk ? `<p class="day-break">${esc(brk.label)}</p>` : ''}
+        ${limit === 0 ? '<p class="day-break off">Day off</p>' : limit !== null ? `<p class="day-break">At most ${esc(fmtMinutes(limit))} of work</p>` : ''}
         <div class="meter" title="${esc(`${fmtMinutes(planned)} planned, about ${fmtMinutes(cap)} free`)}"><span class="${planned > cap + 30 ? 'over' : ''}" style="width:${pct.toFixed(0)}%"></span></div>
         <p class="meter-label">${planned ? `${esc(fmtMinutes(planned))} planned` : 'Nothing planned'}${w ? ` · <strong>${esc(w.reasons[0])}</strong>` : ''}</p>
         ${sched.length ? `<ul class="mini-sched">${sched.join('')}</ul>` : ''}
@@ -97,7 +114,7 @@ export function renderWeek() {
           sessions.length
             ? sessions
                 .map(
-                  (x) => `<button type="button" class="session${x.unplaced ? ' unplaced' : ''}" draggable="true" data-drag data-action="session" data-id="${x.t.id}" data-date="${d}" style="--c:${color(x.t)}">
+                  (x) => `<button type="button" class="session${x.unplaced ? ' unplaced' : ''}" data-drag="session" data-action="session" data-id="${x.t.id}" data-date="${d}" style="--c:${color(x.t)}">
                     <span>${esc(x.t.type === 'exam' ? `Study: ${x.t.title}` : x.t.title)}</span>
                     <small>${x.starts.length ? `${esc(fmtTime(atTime(d, x.starts[0])))} · ` : ''}${esc(fmtMinutes(x.minutes))}${x.unplaced ? ' · doesn’t fit' : ''}${x.pinned ? ` ${ICON.pin}` : ''}</small></button>`,
                 )

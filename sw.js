@@ -1,6 +1,6 @@
 // Service worker: keeps the app usable offline and shows push notifications.
 // Bump VERSION whenever app files change so phones pick up the new version.
-const VERSION = 'class-dashboard-v3';
+const VERSION = 'class-dashboard-v4';
 const SHELL = [
   './',
   'index.html',
@@ -12,9 +12,11 @@ const SHELL = [
   'icons/icon-512.png',
   'icons/apple-touch-icon.png',
   'js/app.js',
+  'js/command.js',
   'js/components.js',
   'js/config.js',
   'js/dates.js',
+  'js/drag.js',
   'js/editor.js',
   'js/planner.js',
   'js/push.js',

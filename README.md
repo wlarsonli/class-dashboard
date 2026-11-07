@@ -9,12 +9,26 @@ laptop and iPhone (added to the Home Screen) and syncs between them through Supa
 
 - **Today:** overdue and due-today items, work planned for today, the next 7 days, today's classes and
   Outlook events, countdowns to exams and big deadlines, and a term progress bar.
-- **Plan → Day:** a timeline of your day. Classes, Outlook events, exams, and deadlines are shown, and
-  the planner fits work blocks into the free time between them, with breaks after each block.
-  - **Moving blocks:** tap a block to move it to another time or day. Blocks you place yourself stay put.
+- **Plan → Day:** a timeline of your day. Classes, your events, Outlook events, exams, and deadlines are
+  shown, and the planner fits work blocks into the free time between them, with breaks after each block.
+  - **Drag and drop:** drag a work block or one of your events to a new time, or drag its bottom edge to
+    change how long it is. On the iPhone, press and hold for a moment first, so normal swipes still scroll.
+    Tap a block instead for more options. Blocks you place yourself stay put.
   - **Re-planning:** when something changes in the app or in Outlook, the plan reshuffles around it.
   - **Your own Outlook study blocks** (like "Math P-Set") count toward that class's work.
-- **Plan → Week:** Monday–Sunday at a glance, with how much work each day holds.
+- **Tell the planner:** type a change into the box at the top of the Plan tab (or the box on Today).
+  Under the box you see what it will do, and afterward what moved, with Undo. For example:
+  - `clear 5-7pm so I can play basketball`, `basketball every tue and thu 5-7pm`, `lift for 1 hour after class`
+  - `take saturday off`, `only 2 hours of work tomorrow`, `no work after 9 tonight`, `plan work again saturday`
+  - `move the essay to sunday`, `study math 2-4 tomorrow`, `skip math study today`, `push basketball back an hour`
+  - `no math class tuesday`, `study 3 hours a day for the midterm`, `when am I free tomorrow?`, `re-plan`
+
+  It runs in the app (no AI service), so it understands these kinds of sentences rather than anything at all.
+- **Your events:** events you add this way (or by tapping one to edit it) live in the app, one day or every
+  week. Tap one to rename it, change its time or days, skip a day, or delete it. Outlook events and
+  classes can't be dragged, since they come from Outlook and your class schedule.
+- **Plan → Week:** Monday–Sunday at a glance, with how much work each day holds. Drag a day's work to
+  another day.
 - **Exam study plans:** exams get a set amount of study every day before them. The defaults are:
   - Finals: 2 hours a day for 7 days
   - Midterms: 2 hours a day for 5 days

@@ -3,9 +3,10 @@ import { TYPE_LABEL } from './components.js';
 import { addDays, atTime, DOW, fmtDate, fmtMinutes, fmtRange, hhmm, parseYmd, relDay, ymd } from './dates.js';
 import { estimateOf, planAndSchedule, studyDays, studyPlanOf } from './planner.js';
 import {
-  createSeries, deleteCourse, deleteTask, moveBlock, moveSession, newTask, removeBlock, saveCourse, saveSeriesFrom, saveTask, state, taskById,
-  toggleDone, unfixBlock,
+  createSeries, deleteCourse, deleteEvent, deleteTask, eventById, moveBlock, moveSession, newTask, removeBlock, saveCourse, saveEvent, saveSeriesFrom,
+  saveTask, skipEventDay, state, taskById, toggleDone, unfixBlock,
 } from './state.js';
+import { eventsOn } from './term.js';
 import { clone, esc, uid } from './util.js';
 
 export const PALETTE = ['#C9B8F0', '#A8DCC8', '#F6C3A5', '#A9CCEB', '#F2B8C6', '#F3DF9A', '#C5D9A8', '#D4CDE3', '#F4B3A2', '#A6DDDF'];
@@ -450,6 +451,75 @@ export function openBlockMenu(taskId, date, start) {
       d.querySelector('[data-remove]').addEventListener('click', async () => {
         d.close();
         await removeBlock(taskId, date, start);
+      });
+    },
+  );
+}
+
+/** Tap one of your events: rename it, change its time or the days it repeats, skip a day, or delete it. */
+export function openEventMenu(id, date) {
+  const ev = eventById(id);
+  if (!ev) return;
+  const occ = eventsOn(date, { events: [ev] })[0];
+  const weekly = (ev.days || []).length > 0;
+  const start = occ?.start || ev.start_time;
+  const end = occ?.end || ev.end_time;
+  const termEnd = state.settings?.term?.end || '';
+  open(
+    `<form class="sheet-form small" data-event-form novalidate>
+      <header class="sheet-head"><h2>${esc(ev.title)}</h2><button type="button" class="btn icon" data-close aria-label="Close">×</button></header>
+      <div class="sheet-body">
+        <label class="field"><span>Name</span><input type="text" name="title" value="${esc(ev.title)}" required></label>
+        <div class="grid3">
+          <label class="field"><span>${weekly ? 'First day' : 'Day'}</span><input type="date" name="date" value="${esc(ev.date)}" required></label>
+          <label class="field"><span>Starts</span><input type="time" name="start" value="${esc(start)}" required></label>
+          <label class="field"><span>Ends</span><input type="time" name="end" value="${esc(end)}" required></label>
+        </div>
+        <fieldset class="field"><legend>Repeat every week on</legend>${dayChecks(ev.days || [])}</fieldset>
+        <label class="field inline"><span>Until</span><input type="date" name="until" value="${esc(ev.until || termEnd)}"></label>
+        <p class="hint">${weekly ? `You opened ${esc(fmtDate(parseYmd(date), { long: true }))}. “Just this day” changes only its time; “Every week” changes them all.` : 'The planner keeps work out of this time.'}</p>
+        <p class="form-error" role="alert" hidden></p>
+      </div>
+      <footer class="sheet-foot">
+        ${weekly ? '<button type="button" class="btn ghost danger" data-skip>Skip this day</button><button type="button" class="btn ghost danger" data-delete>Delete every week</button>' : '<button type="button" class="btn ghost danger" data-delete>Delete</button>'}
+        <span class="spacer"></span>
+        ${weekly ? '<button type="submit" class="btn" data-scope="day">Just this day</button><button type="submit" class="btn btn-primary" data-scope="all">Every week</button>' : '<button type="submit" class="btn btn-primary">Save</button>'}
+      </footer>
+    </form>`,
+    (d) => {
+      const form = d.querySelector('[data-event-form]');
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = form.elements;
+        const title = f.title.value.trim() || 'Busy';
+        const s0 = f.start.value;
+        const e0 = f.end.value;
+        if (!s0 || !e0 || e0 <= s0) return showError(form, 'The end time has to be after the start time.');
+        const days = readDays(form);
+        const next = clone(ev);
+        Object.assign(next, { title, days, until: days.length ? f.until.value || termEnd || null : null });
+        if (!days.length || !weekly) Object.assign(next, { date: f.date.value || ev.date, start_time: s0, end_time: e0 });
+        if (weekly && days.length) {
+          next.date = f.date.value || ev.date;
+          if (e.submitter?.dataset.scope === 'day') next.moved = { ...(ev.moved || {}), [date]: { start: s0, end: e0 } };
+          else {
+            Object.assign(next, { start_time: s0, end_time: e0 });
+            const moved = { ...(ev.moved || {}) };
+            delete moved[date];
+            next.moved = moved;
+          }
+        }
+        if (!days.length) Object.assign(next, { skip: [], moved: {} });
+        d.close();
+        await saveEvent(next);
+      });
+      d.querySelector('[data-delete]').addEventListener('click', async () => {
+        d.close();
+        await deleteEvent(id);
+      });
+      d.querySelector('[data-skip]')?.addEventListener('click', async () => {
+        d.close();
+        await skipEventDay(id, date);
       });
     },
   );

@@ -12,7 +12,7 @@
 // Exams get a study plan instead of one estimate: a set amount every day until the exam.
 import { addDays, dayDiff, fmtMinutes, parseYmd, startOfDay, toMinutes, ymd } from './dates.js';
 import { courseAliases } from './quickadd.js';
-import { meetingsOn } from './term.js';
+import { eventsOn, meetingsOn } from './term.js';
 
 export const DEFAULT_EST = { assignment: 120, essay: 120, reading: 60, exam: 180, task: 30, admin: 15, event: 0 };
 export const DEFAULT_PREP = { final: { daily: 120, days: 7 }, midterm: { daily: 120, days: 5 }, quiz: { daily: 60, days: 3 } };
@@ -38,6 +38,12 @@ const byDue = (a, b) =>
 // Outlook events that look like study time ("Math P-Set", "Huma reading").
 const STUDY = /\b(read|reading|pset|p-set|hw|homework|essay|paper|draft|study|prep|review|research|write|writing|problem|assignment|edfinity|annotation)\b/i;
 export const isStudyBlock = (b) => STUDY.test(b.title || '');
+
+/** The most work you want on a day, if you set one ("only 2 hours tomorrow"). 0 means a day off. */
+export function dayLimit(state, dateStr) {
+  const v = state.settings?.day_limits?.[dateStr];
+  return v === undefined || v === null || v === '' ? null : Number(v);
+}
 
 // ---------- Estimates and exam study plans ----------
 
@@ -78,10 +84,11 @@ export function estimateOf(t, settings) {
 
 // ---------- Free time ----------
 
-/** Busy stretches of a day in minutes after midnight: classes, Outlook events, exams. */
+/** Busy stretches of a day in minutes after midnight: classes, your events, Outlook events, exams. */
 export function busyIntervals(dateStr, state) {
   const out = [];
   for (const m of meetingsOn(dateStr, state)) out.push({ s: minsOf(m.start) - CLASS_BUFFER, e: minsOf(m.end) + CLASS_BUFFER });
+  for (const o of eventsOn(dateStr, state)) out.push({ s: o.s, e: o.e });
   const d0 = parseYmd(dateStr);
   const d1 = addDays(d0, 1);
   for (const b of state.busy || []) {
@@ -143,7 +150,8 @@ export function makeCapacity(state, now = new Date()) {
     let v = 0;
     if (dateStr >= today) {
       const dow = parseYmd(dateStr).getDay();
-      const budget = (dow === 0 || dow === 6 ? cap.weekend : cap.weekday) - (ownStudy.get(dateStr) || 0);
+      const limit = dayLimit(state, dateStr);
+      const budget = (limit ?? (dow === 0 || dow === 6 ? cap.weekend : cap.weekday)) - (ownStudy.get(dateStr) || 0);
       const usable = freeGaps(dateStr, state, { now }).reduce((a, [s, e]) => a + (e - s >= MIN_BLOCK ? e - s - BREAK : 0), 0);
       v = Math.max(0, Math.round(Math.min(budget, usable)));
     }
@@ -248,6 +256,13 @@ export function planTasks(state, { mode = 'fill', now = new Date(), horizon = 28
   }
 
   // Exams: the same amount every study day. Blocks you placed yourself stay; the rest follow the plan.
+  // On a day with a limit ("only 2 hours"), the nearest exam gets its study first.
+  const limitLeft = {};
+  const roomOn = (d) => {
+    const limit = dayLimit(state, d);
+    return limit === null ? Infinity : (limitLeft[d] ??= limit);
+  };
+  exams.sort((a, b) => new Date(a.t.due_at) - new Date(b.t.due_at));
   for (const { t, study, past, future } of exams) {
     const days = studyDays(study, today);
     const pinned = future.filter((s) => s.pinned);
@@ -256,10 +271,14 @@ export function planTasks(state, { mode = 'fill', now = new Date(), horizon = 28
       const mine = pinned.filter((s) => s.date === d);
       if (mine.length) {
         out.push(...mine);
+        if (roomOn(d) !== Infinity) limitLeft[d] -= total(mine);
         continue;
       }
-      const minutes = study.daily - total((fromOutlook.get(t.id) || []).filter((v) => v.date === d));
+      const room = roomOn(d); // a day off or a light day you asked for
+      if (room <= 0) continue;
+      const minutes = Math.min(room, study.daily) - total((fromOutlook.get(t.id) || []).filter((v) => v.date === d));
       if (minutes < 15) continue;
+      if (room !== Infinity) limitLeft[d] -= minutes;
       const existing = future.filter((s) => s.date === d && !s.pinned);
       if (existing.length && total(existing) === minutes) out.push(...existing); // keeps their times stable
       else out.push({ date: d, minutes, pinned: false });
@@ -345,7 +364,7 @@ export function scheduleDays(state, plans, now = new Date(), { dropOverflow = tr
     const fixed = entries
       .filter((e) => isFixed(e.s))
       .map((e) => ({ s: toMinutes(e.s.start), e: toMinutes(e.s.start) + Number(e.s.minutes) + breakAfter(Number(e.s.minutes)) }));
-    let gaps = freeGaps(d, state, { now, extra: fixed });
+    let gaps = dayLimit(state, d) === 0 ? [] : freeGaps(d, state, { now, extra: fixed }); // nothing goes on a day off
 
     const pools = new Map();
     for (const e of movable) {

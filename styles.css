@@ -24,6 +24,7 @@
   --near-bg: #fbf2cf;
   --ok: #2b7459;
   --ok-bg: #def3e9;
+  --mine: #8fd3bd;
   --radius: 18px;
   --radius-sm: 12px;
   --shadow: 0 1px 2px rgb(70 50 90 / 0.05), 0 8px 24px rgb(70 50 90 / 0.06);
@@ -56,6 +57,7 @@
   --near-bg: #3e3820;
   --ok: #8fdcbc;
   --ok-bg: #1f3b31;
+  --mine: #6fc2a6;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
   color-scheme: dark;
 }
@@ -204,15 +206,31 @@ h2.sub { font-size: 18px; margin: 28px 0 12px; }
 .countdowns, .schedule, .task-list, .plain, .warn-list, .mini-sched, .day-group { grid-template-columns: minmax(0, 1fr); }
 
 .quick { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; }
-.quick #quick-input {
+.quick #quick-input, .quick #ask-input {
   border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px;
   min-height: 42px; padding: 10px 16px; min-width: 0; outline: none;
 }
-.quick #quick-input:focus { border-color: var(--accent); background: var(--surface); }
+.quick #quick-input:focus, .quick #ask-input:focus { border-color: var(--accent); background: var(--surface); }
 .quick-preview { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding: 0 4px; }
 .quick-preview:empty { display: none; }
 .qp-title { font-weight: 700; margin-right: 4px; }
 .qp-bit { background: var(--accent-soft); color: var(--accent-ink); padding: 1px 9px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.qp-title.plan { color: var(--ok); }
+.qp-note { color: var(--muted); font-size: 13px; }
+
+/* Plan box and what it did */
+.ask { margin-bottom: 12px; }
+.ask-result { margin-bottom: 12px; padding: 12px 14px; display: grid; gap: 6px; }
+.ask-head { display: flex; align-items: center; gap: 10px; }
+.ask-icon { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ok-bg); color: var(--ok); }
+.ask-icon.warn { background: var(--near-bg); color: var(--near); }
+.ask-icon svg { width: 15px; height: 15px; }
+.ask-title { flex: 1; min-width: 0; font-weight: 700; }
+.ask-line { color: var(--muted); font-size: 13.5px; padding-left: 36px; }
+.ask-moved { margin: 0; padding: 0 0 0 52px; color: var(--muted); font-size: 13.5px; display: grid; gap: 2px; }
+.ask-examples { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 36px; }
+.ask-examples .qp-bit { border: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+.ask-examples .qp-bit:hover { background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent)); }
 
 .warn-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .warn-list li { display: flex; gap: 10px; align-items: flex-start; color: var(--near); }
@@ -299,6 +317,10 @@ h2.sub { font-size: 18px; margin: 28px 0 12px; }
 .warn-badge { color: var(--near); }
 .warn-badge svg { width: 18px; height: 18px; }
 .day-break { font-size: 13px; font-weight: 650; color: var(--ok); background: var(--ok-bg); border-radius: 10px; padding: 4px 8px; }
+.day-break.off { color: var(--accent-ink); background: var(--accent-soft); }
+.mini-sched li.mine > span:first-child { color: var(--muted); }
+.mine-link { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: color-mix(in oklab, var(--mine) 35%, var(--ink-base)); cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mine-link:hover { text-decoration: underline; }
 .meter { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
 .meter span.over { background: var(--soon); }
@@ -363,6 +385,35 @@ a.seg-link, .seg.pills a { display: inline-block; padding: 6px 13px; border-radi
 }
 .tl-item.work:hover { background: color-mix(in oklab, var(--c) 42%, var(--surface)); }
 .tl-item.work.fixed { box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--c) 80%, var(--ink-base) 12%); }
+/* Your own events (and events you added as tasks) */
+.tl-item.mine, .tl-item.tevent {
+  --c: var(--mine); cursor: pointer;
+  background: color-mix(in oklab, var(--mine) 42%, var(--surface)); color: color-mix(in oklab, var(--mine) 22%, var(--ink-base));
+  border-left: 5px solid color-mix(in oklab, var(--mine) 78%, var(--ink-base) 18%);
+}
+.tl-item.mine:hover, .tl-item.tevent:hover { background: color-mix(in oklab, var(--mine) 55%, var(--surface)); }
+
+/* Drag and drop */
+[data-drag] { cursor: grab; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.tl-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 11px; cursor: ns-resize; touch-action: none; }
+.tl-grip::after {
+  content: ''; position: absolute; left: 50%; bottom: 3px; width: 26px; height: 3px; margin-left: -13px; border-radius: 3px;
+  background: currentColor; opacity: 0; transition: opacity 0.15s;
+}
+.tl-item:hover .tl-grip::after, .tl-item.is-dragging .tl-grip::after { opacity: 0.35; }
+@media (hover: none) { .tl-item:not(.short) .tl-grip::after { opacity: 0.25; } .tl-grip { height: 16px; } }
+.tl-item.is-dragging { z-index: 6; cursor: grabbing; box-shadow: 0 10px 28px rgb(50 30 80 / 0.28), 0 0 0 2px color-mix(in oklab, var(--c) 70%, var(--ink-base) 20%); }
+body.dragging, body.dragging * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
+body.dragging .tl-item:not(.is-dragging) { pointer-events: none; }
+.session.is-dragging { opacity: 0.35; }
+.drag-ghost { position: fixed; z-index: 80; pointer-events: none; margin: 0; box-shadow: 0 12px 30px rgb(50 30 80 / 0.3); transform: rotate(-1.5deg); }
+.day.drop-hover { background: color-mix(in oklab, var(--accent-soft) 60%, var(--surface)); }
+
+/* A day off or a light day */
+.day-limit { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 14px; margin-bottom: 12px; background: var(--ok-bg); border-color: transparent; }
+.day-limit p { color: var(--ok); }
+.day-limit.off { background: var(--accent-soft); }
+.day-limit.off p { color: var(--accent-ink); }
 .tl-due { position: absolute; left: 0; right: 0; z-index: 2; height: 0; padding: 0; border: 0; border-top: 2px solid var(--c); background: none; pointer-events: none; }
 .tl-due span {
   position: absolute; right: 6px; top: -11px; pointer-events: auto; cursor: pointer;
@@ -375,6 +426,9 @@ a.seg-link, .seg.pills a { display: inline-block; padding: 6px 13px; border-radi
 .tl-now span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .schedule li.sched-work { cursor: pointer; border-radius: 10px; }
 .schedule li.sched-work:hover { background: var(--surface-2); }
+.schedule li.sched-mine, .schedule li.sched-tevent, .schedule li.sched-exam { cursor: pointer; border-radius: 10px; }
+.schedule li.sched-mine:hover, .schedule li.sched-tevent:hover, .schedule li.sched-exam:hover { background: var(--surface-2); }
+.ev-dot.mine { background: var(--mine); }
 .exam-tag { background: var(--overdue-bg); color: var(--overdue); }
 .planned-at { color: var(--accent-ink); font-weight: 650; }
 .time-move { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0 4px; }
