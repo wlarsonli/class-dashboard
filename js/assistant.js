@@ -175,7 +175,7 @@ function readAction(a) {
       if (t.type === 'exam') return null;
       const now = estimateOf(t, state.settings);
       const minutes = round5(m);
-      if (minutes === now) return null;
+      if (minutes === now) return { same: true }; // it agrees with the estimate you have
       return { cmd: { kind: 'estimate', t, minutes }, text: `${name(t)}: ${fmtMinutes(now)} → ${fmtMinutes(minutes)}`, why: oneLine(a.why, 140) };
     }
     case 'add_task': {
@@ -310,11 +310,13 @@ export async function askAI(text) {
     const res = await store.invoke('assistant', { messages: ai.messages.slice(-10), context: buildContext() });
     if (state.ai !== ai) return; // you started a new chat meanwhile
     const raw = Array.isArray(res?.actions) ? res.actions : [];
-    const items = raw.map(readAction).filter(Boolean).map((x) => ({ ...x, on: true }));
+    const read = raw.map(readAction);
+    const items = read.filter((x) => x && !x.same).map((x) => ({ ...x, on: true }));
+    const dropped = read.filter((x) => !x).length;
     const reply = String(res?.reply || '').trim() || (items.length ? 'Here’s what I’d change:' : 'I don’t have an answer for that.');
     ai.log.push({ who: 'ai', text: reply });
     ai.messages.push({ role: 'assistant', content: res?.raw || JSON.stringify({ reply, actions: raw }) });
-    ai.pending = items.length || raw.length ? { items, dropped: raw.length - items.length, text } : null;
+    ai.pending = items.length || dropped ? { items, dropped, text } : null;
   } catch (err) {
     console.warn('AI helper', err);
     if (state.ai !== ai) return;
@@ -365,7 +367,7 @@ export function aiCard() {
   const p = ai.pending;
   const changes = p
     ? `<div class="ai-pending">
-        ${p.items.length ? `<p class="ai-pending-title">Suggested changes</p>
+        ${p.items.length ? `<p class="ai-pending-title">Suggested changes <span class="ai-pending-hint">Tap Apply to make them</span></p>
         <ul class="ai-changes">${p.items
           .map(
             (x, i) => `<li><label><input type="checkbox" data-ai-pick="${i}"${x.on ? ' checked' : ''}><span>${esc(x.text)}${x.why ? `<span class="ai-why">${esc(x.why)}</span>` : ''}</span></label></li>`,

@@ -15,12 +15,13 @@ const PROMPT = `You are the planning helper inside a college student's class das
 Rules:
 - Use only the dashboard data below. Times are the student's local time in 24-hour HH:MM; dates are YYYY-MM-DD.
 - Keep "reply" short: one to three plain, friendly sentences. Use 12-hour times like "5 pm" in the reply.
-- Suggest changes only when the student asks for them, or asks for estimates. Each change goes in "actions"; the student reviews them and taps Apply. In the reply, say what you're suggesting, not that it's done.
+- In the reply, call tasks and events by their names ("your math assignment", "basketball"). The ids are only for "actions"; the student never sees them.
+- Suggest changes only when the student asks for them, or asks for estimates. Each change goes in "actions". Nothing changes until the student reviews the list and taps Apply, so the reply offers changes ("I can add gym on Saturday 9–10 am", "Want me to move it?"). Never write that a change is made or about to be made ("I've…", "I'll…", "Done", "Got it").
 - Refer to tasks and events by their ids (T3, E1). Never make up an id.
 - Something at a set time (gym, errands, practice, a meeting) is an add_event. Work that has to be done by a deadline is an add_task; the planner then finds time for it.
 - Don't do coursework: don't write, outline, or edit papers, solve problems, or summarize readings. The student's courses limit AI use. Offer to plan time for the work instead.
 - If the request is unclear, ask one short question and return no actions.
-- Estimates: judge from the task type, its title and notes, and how much is already done. Give minutes and a short reason. Exams use study plans, not estimates. Asked to estimate in general, cover open tasks due in the next two weeks, mainly those marked "rough default".
+- Estimates: judge from the task type, its title and notes, and how much is already done. Give minutes and a short reason, and only when it differs from the current estimate. Exams use study plans, not estimates. Asked to estimate in general, cover open tasks due in the next two weeks, mainly those marked "rough default".
 - Plan around classes, events, and exams, inside the student's work hours, and never before now.
 
 Answer with only a JSON object, no other text:
@@ -82,7 +83,7 @@ async function callModel(messages: { role: string; content: string }[]) {
   // Ask for a quick answer and pure JSON. If the model doesn't take those options, ask again without them.
   const attempts = [{ ...base, reasoning_effort: 'low', response_format: { type: 'json_object' } }, { ...base, reasoning_effort: 'low' }, base];
   let last = '';
-  for (const body of attempts) {
+  for (const [tries, body] of attempts.entries()) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -92,7 +93,7 @@ async function callModel(messages: { role: string; content: string }[]) {
     if (res.ok) {
       const j = JSON.parse(text);
       const content = j?.choices?.[0]?.message?.content;
-      if (typeof content === 'string' && content.trim()) return { content, usage: j.usage ?? null };
+      if (typeof content === 'string' && content.trim()) return { content, usage: j.usage ?? null, tries: tries + 1 };
       last = 'The AI sent back an empty answer.';
       continue; // e.g. it spent the whole answer thinking: try the plainer request
     }
@@ -119,13 +120,13 @@ Deno.serve(async (req) => {
     if (!turns || !context) return json({ error: 'bad_request', message: 'Nothing to ask.' }, 400);
 
     const started = Date.now();
-    const { content, usage } = await callModel([
+    const { content, usage, tries } = await callModel([
       { role: 'system', content: `${PROMPT}\n\nThe student's dashboard right now:\n${context}` },
       ...turns,
     ]);
     // Log sizes only, never the question or the dashboard data.
-    console.log(JSON.stringify({ model: MODEL, ms: Date.now() - started, usage }));
-    return json({ ...parseAnswer(content), raw: content.slice(0, 6000), model: MODEL });
+    console.log(JSON.stringify({ model: MODEL, ms: Date.now() - started, tries, usage }));
+    return json({ ...parseAnswer(content), raw: content.slice(0, 6000), model: MODEL, tries });
   } catch (e) {
     if (e instanceof AiError) return json({ error: e.code, message: e.message }, e.code === 'not_set_up' ? 503 : 502);
     console.error(e);
