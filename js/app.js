@@ -1,4 +1,5 @@
 // Starts the app: sign-in, routing between screens, and all the click/submit handling.
+import { applyAI, askAI, newChat, pickAI, skipAI } from './assistant.js';
 import { describe, EXAMPLES, interpret } from './command.js';
 import { addDays, fmtRange, startOfDay, weekStart, ymd } from './dates.js';
 import { initDrag, isDragging } from './drag.js';
@@ -23,7 +24,7 @@ const TITLES = { today: 'Today', day: 'Day plan', week: 'Week plan', classes: 'C
 const NAV_OF = { day: 'plan', week: 'plan' };
 const main = document.getElementById('view');
 const modal = document.getElementById('modal');
-const drafts = { 'quick-input': '', 'ask-input': '' };
+const drafts = { 'quick-input': '', 'ask-input': '', 'ai-input': '' };
 let pendingRender = false;
 
 const viewFromHash = () => {
@@ -41,7 +42,7 @@ function applyTheme() {
 // While you're typing in a settings field, background refreshes wait instead of redrawing the page.
 function isEditing() {
   const a = document.activeElement;
-  return !!(a && main.contains(a) && a.matches('input, textarea, select') && !['quick-input', 'ask-input', 'task-search'].includes(a.id));
+  return !!(a && main.contains(a) && a.matches('input, textarea, select') && !['quick-input', 'ask-input', 'ai-input', 'task-search'].includes(a.id));
 }
 
 /** The day a typed change is about when it doesn't name one: the day (or week) you're looking at. */
@@ -54,6 +55,7 @@ function viewedDate() {
 
 /** Live preview under the box: what pressing Enter will do. */
 function updatePreview(input) {
+  if (input.id === 'ai-input') return;
   const out = document.getElementById(`${input.id === 'quick-input' ? 'quick' : 'ask'}-preview`);
   if (!out) return;
   const text = input.value.trim();
@@ -79,13 +81,14 @@ async function submitText(text, { box }) {
   const cmd = interpret(text, { state, date: viewedDate() });
   if (!cmd) return;
   if (cmd.kind === 'error') {
-    state.ask = { ok: false, text, title: cmd.message, examples: /couldn't|Which|What time/.test(cmd.message) ? EXAMPLES.slice(0, 6) : null };
+    const lost = /couldn't|Which|What time/.test(cmd.message);
+    state.ask = { ok: false, text, title: cmd.message, examples: lost ? EXAMPLES.slice(0, 6) : null, ai: lost ? text : null };
     rerender();
     return false;
   }
   if (cmd.kind === 'task') {
     if (box === 'ask' && !parseQuickAdd(text, state.courses).due_at) {
-      state.ask = { ok: false, text, title: "I couldn't tell what to change.", examples: EXAMPLES };
+      state.ask = { ok: false, text, title: "I couldn't tell what to change.", examples: EXAMPLES, ai: text };
       rerender();
       return false;
     }
@@ -227,6 +230,17 @@ const ACTIONS = {
     updatePreview(input);
     input.focus();
   },
+  'ask-ai': async (el) => {
+    state.ask = null;
+    drafts['ask-input'] = '';
+    drafts['quick-input'] = '';
+    if (location.hash !== '#today' && location.hash !== '') location.hash = '#today';
+    await askAI(el.dataset.text);
+  },
+  'ai-example': (el) => askAI(el.dataset.text),
+  'ai-apply': () => applyAI(),
+  'ai-skip': () => skipAI(),
+  'ai-new': () => newChat(),
   'clear-limit': (el) => applyCommand({ kind: 'limit', dates: [el.dataset.date], minutes: null, chips: ['Plan work as usual', 'this day'] }),
   'day-prev': () => {
     state.dayOffset -= 1;
@@ -317,6 +331,12 @@ const FORMS = {
     if ((await submitText(text, { box: 'quick' })) === false) drafts['quick-input'] = text;
     rerender();
   },
+  async ai(fd) {
+    const text = String(fd.get('text') || '').trim();
+    if (!text) return;
+    drafts['ai-input'] = '';
+    await askAI(text);
+  },
   async ask(fd) {
     const text = String(fd.get('text') || '').trim();
     if (!text) return;
@@ -403,7 +423,7 @@ document.addEventListener('submit', async (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.id === 'quick-input' || t.id === 'ask-input') {
+  if (t.id === 'quick-input' || t.id === 'ask-input' || t.id === 'ai-input') {
     drafts[t.id] = t.value;
     updatePreview(t);
   } else if (t.dataset?.filter === 'q') {
@@ -417,10 +437,16 @@ document.addEventListener('change', async (e) => {
   if (t.closest('dialog')) return;
   try {
     if (t.matches('[data-import]')) await readImport(t);
+    else if (t.dataset?.aiPick !== undefined) pickAI(Number(t.dataset.aiPick), t.checked);
     else if (t.dataset?.filter && t.dataset.filter !== 'q') {
       state.filter[t.dataset.filter] = t.value;
       rerender();
     } else if (t.dataset?.setting === 'theme') await saveSettings({ theme: t.value });
+    else if (t.dataset?.setting === 'feed') {
+      const box = (n) => !!t.closest('.feed')?.querySelector(`[name=${n}]`)?.checked;
+      await saveSettings({ feed: { events: box('feed_events'), work: box('feed_work') } });
+      toast('Saved. Outlook picks this up the next time it refreshes the calendar.');
+    }
   } catch (err) {
     toast(err.message || String(err));
   }

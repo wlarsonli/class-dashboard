@@ -1,7 +1,7 @@
 // App state and every action that changes data.
 import { freeTimeOn } from './command.js';
 import { addDays, atTime, fmtDate, fmtHM, fmtMinutes, fmtRange, hhmm, parseYmd, relDay, toMinutes, ymd } from './dates.js';
-import { byBlock, planAndSchedule } from './planner.js';
+import { byBlock, estimateOf, planAndSchedule } from './planner.js';
 import { parseQuickAdd } from './quickadd.js';
 import { createStore, defaultSettings, mergeSettings, row } from './store.js';
 import { busyOn, eventsOn, meetingsOn } from './term.js';
@@ -393,11 +393,15 @@ const pruneLimits = (lim) => {
   return Object.fromEntries(Object.entries(lim).filter(([d, v]) => d >= today && v !== null && v !== undefined));
 };
 
+const taskFields = (t) => ({
+  plan: t.plan || [], study: t.study ?? null, due_at: t.due_at, duration_minutes: t.duration_minutes, estimate_minutes: t.estimate_minutes ?? null,
+});
+
 function snapshot() {
   return {
     events: clone(state.events),
     limits: clone(state.settings.day_limits || {}),
-    tasks: new Map(state.tasks.map((t) => [t.id, clone({ plan: t.plan || [], study: t.study ?? null, due_at: t.due_at, duration_minutes: t.duration_minutes })])),
+    tasks: new Map(state.tasks.map((t) => [t.id, clone(taskFields(t))])),
     meetings: new Map(state.meetings.map((m) => [m.id, clone(m.exceptions || [])])),
   };
 }
@@ -405,18 +409,22 @@ function snapshot() {
 /** Puts things back the way they were in `snap`. Returns what to save. */
 function restoreLocal(snap) {
   const keep = new Set(snap.events.map((e) => e.id));
-  const ch = { deleteEvents: state.events.filter((e) => !keep.has(e.id)).map((e) => e.id), events: [], tasks: [], meetings: [], settings: false };
+  const ch = { deleteEvents: state.events.filter((e) => !keep.has(e.id)).map((e) => e.id), events: [], tasks: [], deleteTasks: [], meetings: [], settings: false };
   ch.events = snap.events.filter((e) => JSON.stringify(e) !== JSON.stringify(eventById(e.id)));
   state.events = clone(snap.events);
   if (JSON.stringify(snap.limits) !== JSON.stringify(state.settings.day_limits || {})) {
     state.settings = mergeSettings({ ...state.settings, day_limits: snap.limits });
     ch.settings = true;
   }
+  const created = new Set(snap.created || []);
+  if (created.size) {
+    ch.deleteTasks = state.tasks.filter((t) => created.has(t.id)).map((t) => t.id);
+    state.tasks = state.tasks.filter((t) => !created.has(t.id));
+  }
   for (const t of state.tasks) {
     const p = snap.tasks.get(t.id);
     if (!p) continue;
-    const cur = { plan: t.plan || [], study: t.study ?? null, due_at: t.due_at, duration_minutes: t.duration_minutes };
-    if (JSON.stringify(cur) !== JSON.stringify(p)) {
+    if (JSON.stringify(taskFields(t)) !== JSON.stringify(p)) {
       Object.assign(t, clone(p));
       ch.tasks.push(t);
     }
@@ -431,11 +439,12 @@ function restoreLocal(snap) {
   return ch;
 }
 
-function commit({ events = [], deleteEvents = [], tasks = [], meetings = [], settings = false } = {}) {
+function commit({ events = [], deleteEvents = [], tasks = [], deleteTasks = [], meetings = [], settings = false } = {}) {
   return persist(async () => {
-    if (events.length) await store.saveEvents(events);
+    if (events.length) await store.saveEvents([...new Set(events)]);
     if (deleteEvents.length) await store.deleteEvents(deleteEvents);
     if (tasks.length) await store.saveTasks([...new Set(tasks)]);
+    if (deleteTasks.length) await store.deleteTasks(deleteTasks);
     if (meetings.length) await store.saveMeetings([...new Set(meetings)]);
     if (settings) await store.saveSettings(state.settings);
   });
@@ -474,50 +483,39 @@ function planDiff(snap, focus) {
     };
     // Days that gained time: where moved work went.
     const gained = [...new Set(after.map((b) => b.date))].filter((d) => minutesOf(on(after, d)) > minutesOf(on(before, d)));
+    const parts = []; // one line per task: "CS Homework 7 → Mon 1:30 pm, Tue 12:30 pm"
     for (const d of focus) {
       const b0 = on(before, d);
       const b1 = on(after, d);
       if (!b0.length && !b1.length) continue;
       if (b0.length && b1.length) {
-        if (b0.map(at).join() !== b1.map(at).join() || minutesOf(b0) !== minutesOf(b1)) out.push(`${workName(t)} → ${when(d)}`);
+        if (b0.map(at).join() !== b1.map(at).join() || minutesOf(b0) !== minutesOf(b1)) parts.push(when(d));
       } else if (b0.length) {
         const to = gained.filter((x) => x !== d);
-        out.push(`${workName(t)} → ${to.length ? to.map(when).join(', ') : `skipped ${dayLabel(d)}`}`);
-      } else out.push(`${workName(t)} → ${when(d)}`);
+        parts.push(...(to.length ? to.map(when) : [`skipped ${dayLabel(d)}`]));
+      } else parts.push(when(d));
     }
+    if (parts.length) out.push(`${workName(t)} → ${[...new Set(parts)].join(', ')}`);
   }
-  return [...new Set(out)];
+  return out;
 }
 
 /** "Added Basketball, Tomorrow 2–4 pm" reads better as "…, tomorrow 2–4 pm". */
 const sentence = (text) => text.replace(/(.)\b(Today|Tomorrow)\b/g, (_m, before, w) => `${before}${w.toLowerCase()}`);
 
-/** Makes a change you typed into the planner box (see command.js), then reports what moved. */
-export async function applyCommand(cmd, text = '') {
-  if (cmd.kind === 'undo') {
-    if (state.ask?.snap) await restore(state.ask.snap);
-    else toast('Nothing to undo.');
-    return;
-  }
-  if (cmd.kind === 'free') {
-    const gaps = freeTimeOn(cmd.date, state);
-    const total = gaps.reduce((a, [s, e]) => a + e - s, 0);
-    const fmt = ([s, e]) => fmtRange(atTime(cmd.date, hm(s)), atTime(cmd.date, hm(Math.min(e, 1439))));
-    state.ask = {
-      ok: true, text,
-      title: gaps.length ? `Free ${dayLabel(cmd.date)}: ${fmtMinutes(total)}` : `No free time left ${dayLabel(cmd.date)}`,
-      lines: gaps.length ? [gaps.map(fmt).join(' · ')] : ['Classes, events, and planned work fill your work hours.'],
-      moved: [],
-    };
-    rerender();
-    return;
-  }
-  const snap = snapshot();
-  const ch = { events: [], deleteEvents: [], tasks: [], meetings: [], settings: false };
-  const focus = new Set();
-  const only = [];
+/** What a change touches, so it can be saved, re-planned, and undone in one go. */
+const newChange = () => ({
+  ch: { events: [], deleteEvents: [], tasks: [], deleteTasks: [], meetings: [], settings: false },
+  focus: new Set(),
+  only: [],
+  mode: 'fill',
+  created: [],
+});
+
+/** Makes one change in memory. Returns how to describe it, or null when there's nothing to do. */
+function stage(cmd, x) {
+  const { ch, focus, only } = x;
   const today = ymd(new Date());
-  let mode = 'fill';
   let title = '';
   switch (cmd.kind) {
     case 'event': {
@@ -533,7 +531,7 @@ export async function applyCommand(cmd, text = '') {
     }
     case 'cancel-event': {
       const ev = eventById(cmd.ev.id);
-      if (!ev) return;
+      if (!ev) return null;
       if (cmd.all) {
         eventDates(ev, today, 15).forEach((d) => focus.add(d));
         state.events = state.events.filter((e) => e.id !== ev.id);
@@ -549,7 +547,7 @@ export async function applyCommand(cmd, text = '') {
     }
     case 'move-event': {
       const ev = eventById(cmd.ev.id);
-      if (!ev) return;
+      if (!ev) return null;
       Object.assign(ch, moveEventLocal(ev, cmd.date, { toDate: cmd.toDate, start: cmd.start, end: cmd.end, series: cmd.all }, ch));
       focus.add(cmd.date);
       focus.add(cmd.toDate);
@@ -573,7 +571,7 @@ export async function applyCommand(cmd, text = '') {
     case 'move-work':
     case 'schedule-work': {
       const t = taskById(cmd.t.id);
-      if (!t) return;
+      if (!t) return null;
       const from = cmd.kind === 'move-work' ? cmd.from : cmd.date;
       const to = cmd.kind === 'move-work' ? cmd.toDate : cmd.date;
       const before = minutesOf((t.plan || []).filter((b) => b.date === from));
@@ -589,7 +587,7 @@ export async function applyCommand(cmd, text = '') {
     }
     case 'skip-work': {
       const t = taskById(cmd.t.id);
-      if (!t) return;
+      if (!t) return null;
       const moving = (t.plan || []).filter((b) => b.date === cmd.date);
       t.plan = (t.plan || []).filter((b) => b.date !== cmd.date);
       focus.add(cmd.date);
@@ -617,7 +615,7 @@ export async function applyCommand(cmd, text = '') {
     }
     case 'study': {
       const t = taskById(cmd.t.id);
-      if (!t) return;
+      if (!t) return null;
       const study = { ...(t.study || {}) };
       if (cmd.daily !== undefined) study.daily = cmd.daily;
       if (cmd.start) study.start = cmd.start;
@@ -639,24 +637,93 @@ export async function applyCommand(cmd, text = '') {
       break;
     }
     case 'replan':
-      mode = 'rebalance';
+      x.mode = 'rebalance';
       title = 'Re-planned everything you haven’t placed yourself';
       for (let i = 0; i < 7; i++) focus.add(ymd(addDays(new Date(), i)));
       break;
+    case 'estimate': {
+      // A new estimate: the work you didn't place yourself gets planned again.
+      const t = taskById(cmd.t.id);
+      if (!t || t.type === 'exam') return null;
+      const before = estimateOf(t, state.settings);
+      if (before === cmd.minutes) return null;
+      (t.plan || []).filter((b) => b.date >= today).forEach((b) => focus.add(b.date));
+      for (let i = 0; i < 7; i++) focus.add(ymd(addDays(new Date(), i)));
+      t.estimate_minutes = cmd.minutes;
+      t.plan = (t.plan || []).filter((b) => b.pinned || b.date < today);
+      ch.tasks.push(t);
+      title = `Estimate for ${workName(t)}: ${fmtMinutes(before)} → ${fmtMinutes(cmd.minutes)}`;
+      break;
+    }
+    case 'add-task': {
+      const t = row('tasks', { source: 'manual', ...cmd.task, id: uid() });
+      state.tasks.push(t);
+      ch.tasks.push(t);
+      x.created.push(t.id);
+      for (let i = 0; i < 7; i++) focus.add(ymd(addDays(new Date(), i)));
+      const due = t.due_at ? new Date(t.due_at) : null;
+      title = `Added ${workName(t)}${due ? `, due ${dayLabel(ymd(due))} ${fmtHM(hhmm(due))}` : ''}`;
+      break;
+    }
     default:
-      return;
+      return null;
   }
-  const ok = await commit(ch);
+  return title || null;
+}
+
+/** Saves staged changes, re-plans around them, and shows what moved (with Undo). */
+async function finish(x, snap, { text, title, lines = [] }) {
+  snap.created = x.created;
+  const ok = await commit(x.ch);
   if (!ok) {
     restoreLocal(snap);
     rerender();
+    return false;
+  }
+  for (const id of x.only) await autoPlan('rebalance', { only: id });
+  await autoPlan(x.mode);
+  const moved = planDiff(snap, [...x.focus].sort());
+  state.ask = { ok: true, text, title: sentence(title), lines, moved, snap };
+  rerender();
+  return true;
+}
+
+/** Makes a change you typed into the planner box (see command.js), then reports what moved. */
+export async function applyCommand(cmd, text = '') {
+  if (cmd.kind === 'undo') {
+    if (state.ask?.snap) await restore(state.ask.snap);
+    else toast('Nothing to undo.');
     return;
   }
-  for (const id of only) await autoPlan('rebalance', { only: id });
-  await autoPlan(mode);
-  const moved = planDiff(snap, [...focus].sort());
-  state.ask = { ok: true, text, title: sentence(title), lines: [], moved, snap };
-  rerender();
+  if (cmd.kind === 'free') {
+    const gaps = freeTimeOn(cmd.date, state);
+    const total = gaps.reduce((a, [s, e]) => a + e - s, 0);
+    const fmt = ([s, e]) => fmtRange(atTime(cmd.date, hm(s)), atTime(cmd.date, hm(Math.min(e, 1439))));
+    state.ask = {
+      ok: true, text,
+      title: gaps.length ? `Free ${dayLabel(cmd.date)}: ${fmtMinutes(total)}` : `No free time left ${dayLabel(cmd.date)}`,
+      lines: gaps.length ? [gaps.map(fmt).join(' · ')] : ['Classes, events, and planned work fill your work hours.'],
+      moved: [],
+    };
+    rerender();
+    return;
+  }
+  const snap = snapshot();
+  const x = newChange();
+  const title = stage(cmd, x);
+  if (title) await finish(x, snap, { text, title });
+}
+
+/** Several changes at once (the AI helper's suggestions), saved together with one Undo. */
+export async function applyCommands(cmds, { text = '' } = {}) {
+  const snap = snapshot();
+  const x = newChange();
+  const done = cmds.map((c) => stage(c, x)).filter(Boolean).map(sentence);
+  if (!done.length) {
+    toast('Nothing to change: those are already in your plan.');
+    return false;
+  }
+  return finish(x, snap, { text, title: done.length === 1 ? done[0] : `Made ${done.length} changes`, lines: done.length === 1 ? [] : done });
 }
 
 /** Moves one day of an event (a weekly event changes just that day, unless `series`). */

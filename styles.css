@@ -231,6 +231,40 @@ h2.sub { font-size: 18px; margin: 28px 0 12px; }
 .ask-examples { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 36px; }
 .ask-examples .qp-bit { border: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
 .ask-examples .qp-bit:hover { background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent)); }
+.ask-ai { padding-left: 36px; }
+
+/* The AI helper on Today */
+.ai { display: grid; gap: 10px; }
+.ai .card-head { margin-bottom: 0; }
+.ai-spark { color: var(--accent); }
+.ai-log { display: grid; gap: 8px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; }
+.ai-msg { max-width: 88%; padding: 8px 13px; border-radius: 16px; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-line; }
+.ai-msg.you { justify-self: end; background: var(--accent); color: #fff; border-bottom-right-radius: 6px; }
+.ai-msg.bot { justify-self: start; background: var(--surface-2); border: 1px solid var(--line); border-bottom-left-radius: 6px; }
+.ai-msg.thinking { display: flex; gap: 5px; padding: 12px 14px; }
+.ai-msg.thinking i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); animation: ai-dot 1.2s infinite ease-in-out; }
+.ai-msg.thinking i:nth-child(3) { animation-delay: 0.15s; }
+.ai-msg.thinking i:nth-child(4) { animation-delay: 0.3s; }
+@keyframes ai-dot { 0%, 80%, 100% { opacity: 0.3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+.ai-note { color: var(--muted); font-size: 13px; text-align: center; }
+.ai-error { color: var(--overdue); background: var(--overdue-bg); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ai-pending { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.ai-pending-title { font-weight: 700; font-size: 14px; }
+.ai-changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ai-changes label { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; font-size: 14.5px; }
+.ai-changes input { margin-top: 3px; accent-color: var(--accent); width: 17px; height: 17px; flex: none; }
+.ai-why { display: block; color: var(--muted); font-size: 13px; }
+.ai-form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+.ai-form #ai-input {
+  border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px;
+  min-height: 42px; padding: 10px 16px; min-width: 0; outline: none;
+}
+.ai-form #ai-input:focus { border-color: var(--accent); background: var(--surface); }
+.ai-form #ai-input:disabled { opacity: 0.6; }
+.ai-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-examples .qp-bit { border: 0; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
+.ai-examples .qp-bit:hover { background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent)); }
+.ai-foot { margin-top: 0; font-size: 12.5px; }
 
 .warn-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .warn-list li { display: flex; gap: 10px; align-items: flex-start; color: var(--near); }
@@ -636,4 +670,5 @@ dialog::backdrop { background: rgb(35 25 55 / 0.36); -webkit-backdrop-filter: bl
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+  .ai-msg.thinking i { animation: none; opacity: 0.6; }
 }

@@ -115,6 +115,7 @@ export function askResult() {
     </div>
     ${(a.lines || []).map((l) => `<p class="ask-line">${esc(l)}</p>`).join('')}
     ${moved.length ? `<ul class="ask-moved">${moved.slice(0, 5).map((m) => `<li>${esc(m)}</li>`).join('')}${moved.length > 5 ? `<li>and ${moved.length - 5} more</li>` : ''}</ul>` : ''}
+    ${a.ai ? `<div class="row-gap ask-ai"><button class="btn small" type="button" data-action="ask-ai" data-text="${esc(a.ai)}"><span aria-hidden="true">✦</span> Ask AI instead</button></div>` : ''}
     ${a.examples ? `<p class="ask-line">Things you can say:</p><div class="ask-examples">${a.examples.map((x) => `<button type="button" class="qp-bit" data-action="ask-example" data-text="${esc(x)}">${esc(x)}</button>`).join('')}</div>` : ''}
   </section>`;
 }

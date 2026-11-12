@@ -15,6 +15,7 @@ export function defaultSettings() {
     study_window: { start: '08:00', end: '23:00', weekend_start: '10:00' },
     exam_prep: { final: { daily: 120, days: 7 }, midterm: { daily: 120, days: 5 }, quiz: { daily: 60, days: 3 } },
     day_limits: {}, // { 'YYYY-MM-DD': most minutes of work that day } (0 = day off)
+    feed: { events: true, work: true }, // what the Outlook calendar link shows besides deadlines
     planner_version: 0,
     theme: 'auto',
     timezone: 'America/Chicago',
@@ -38,6 +39,7 @@ export function mergeSettings(s = {}) {
       quiz: { ...d.exam_prep.quiz, ...(s.exam_prep?.quiz || {}) },
     },
     day_limits: { ...(s.day_limits || {}) },
+    feed: { ...d.feed, ...(s.feed || {}) },
   };
 }
 
@@ -358,7 +360,19 @@ class SupabaseStore {
 
   async invoke(name, body = {}) {
     const { data, error } = await this.sb.functions.invoke(name, { body });
-    if (error) throw error;
+    if (error) {
+      // The function's own explanation is in the response body ({ error, message }).
+      let info = null;
+      try {
+        info = await error.context?.json?.();
+      } catch {
+        /* not JSON */
+      }
+      const err = new Error(info?.message || error.message);
+      err.code = info?.error || '';
+      err.name = error.name;
+      throw err;
+    }
     return data;
   }
 

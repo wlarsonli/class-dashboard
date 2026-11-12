@@ -1,3 +1,4 @@
+import { aiCard } from '../assistant.js';
 import { askResult, byDue, chip, empty, ICON, section, taskRow } from '../components.js';
 import { addDays, countdown, DOW_LONG, fmtDate, fmtMinutes, fmtRange, MON_LONG, parseYmd, relDay, startOfDay, ymd } from '../dates.js';
 import { estimateOf, workloadWarnings } from '../planner.js';
@@ -158,7 +159,7 @@ export function renderToday() {
 
   return `${head}
   <div class="today-grid">
-    <div class="col">${quick}${state.ask ? `<div class="o-0">${askResult()}</div>` : ''}${headsUp}${overdueCard}${todayCard}${plannedCard}${weekCard}${doneCard}${noDateCard}</div>
+    <div class="col">${aiCard()}${quick}${state.ask ? `<div class="o-0">${askResult()}</div>` : ''}${headsUp}${overdueCard}${todayCard}${plannedCard}${weekCard}${doneCard}${noDateCard}</div>
     <div class="col">${scheduleCard}${comingCard}${termCard}</div>
   </div>`;
 }

@@ -112,16 +112,19 @@ function connectionsCard(cloud) {
     `<form data-form="connections" class="stack-sm">
       <label class="field"><span>Canvas calendar feed</span><input type="url" name="canvas_feed_url" value="${esc(i.canvas_feed_url || '')}" placeholder="https://canvas.uchicago.edu/feeds/calendars/….ics" spellcheck="false"></label>
       <label class="field"><span>Outlook calendar (published ICS link)</span><input type="url" name="outlook_feed_url" value="${esc(i.outlook_feed_url || '')}" placeholder="https://outlook.office365.com/owa/calendar/…/calendar.ics" spellcheck="false"></label>
-      <p class="hint">Keep both links private: anyone who has them can see that calendar. ${cloud ? 'The dashboard checks them every hour.' : 'They start syncing once the dashboard is online.'}</p>
+      <p class="hint">Keep both links private: anyone who has them can see that calendar. ${cloud ? 'The dashboard checks them every 15 minutes.' : 'They start syncing once the dashboard is online.'}</p>
       <div class="row-gap"><button class="btn btn-primary" type="submit">Save links</button>${cloud ? '<button class="btn" type="button" data-action="sync-now">Sync now</button>' : ''}</div>
       ${last ? `<p class="hint">${esc(last)}</p>` : ''}
     </form>
     ${
       feed
         ? `<div class="feed">
-            <p><strong>Your deadlines in Outlook.</strong> In Outlook on the web, open Calendar, choose <em>Add calendar</em> → <em>Subscribe from web</em>, and paste this link:</p>
-            <div class="copy-row"><input readonly value="${esc(feed)}" aria-label="Deadline calendar link" spellcheck="false"><button class="btn" type="button" data-action="copy" data-copy="${esc(feed)}">Copy</button></div>
-            <p class="hint">Outlook refreshes subscribed calendars every few hours, so new deadlines can take a while to show up there.</p>
+            <p><strong>Your dashboard in Outlook.</strong> In Outlook on the web, open Calendar, choose <em>Add calendar</em> → <em>Subscribe from web</em>, and paste this link:</p>
+            <div class="copy-row"><input readonly value="${esc(feed)}" aria-label="Dashboard calendar link" spellcheck="false"><button class="btn" type="button" data-action="copy" data-copy="${esc(feed)}">Copy</button></div>
+            <p class="hint">It shows your deadlines and exams, and also:</p>
+            <label class="toggle"><input type="checkbox" data-setting="feed" name="feed_events"${checked(state.settings.feed?.events !== false)}> Your events, like basketball</label>
+            <label class="toggle"><input type="checkbox" data-setting="feed" name="feed_work"${checked(state.settings.feed?.work !== false)}> Your planned work blocks</label>
+            <p class="hint">Outlook refreshes subscribed calendars every few hours, so changes can take a while to show up there. Work blocks are as of the last time you opened the dashboard.</p>
           </div>`
         : ''
     }`,

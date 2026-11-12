@@ -40,3 +40,6 @@ verify_jwt = false
 
 [functions.calendar]
 verify_jwt = false
+
+[functions.assistant]
+verify_jwt = false
